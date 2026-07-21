@@ -9,7 +9,7 @@ Niri-only Arch Linux installer for UEFI systems. The installer keeps destructive
 - Niri desktop only.
 - Btrfs root filesystem with workload-aware sibling subvolumes.
 - Unified Kernel Images booted directly through EFISTUB.
-- Optional LUKS root encryption with passphrase-only, TPM2 + PIN, or FIDO2 + PIN unlock. TPM2 enrollment binds to no PCRs (PIN-protected) and keeps the passphrase slot as a fallback; remove it with `systemd-cryptenroll --wipe-slot=password` after the first successful TPM2 unlock.
+- Optional LUKS root encryption with passphrase-only, TPM2 + PIN, or FIDO2 + PIN unlock. The selected unlock method is the only enrolled LUKS method after installation; TPM2/FIDO2 installs remove the temporary install passphrase slot and leave backup enrollment to post-install `systemd-cryptenroll` use. TPM2 enrollment binds to no PCRs and relies on the PIN for local authorization.
 - Optional Secure Boot setup through always-installed `sbctl`.
 - AppArmor always installed and enabled.
 - Optional kernel lockdown.

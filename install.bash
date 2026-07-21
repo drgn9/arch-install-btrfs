@@ -586,20 +586,24 @@ EOF
     if [[ "$encrypt_root" == "yes" ]]; then
         case "$unlock_method" in
             tpm2)
-                echo "Enrolling TPM2 LUKS key with PIN. The current LUKS passphrase is the install user's password."
-                target_chroot systemd-cryptenroll "$root_part" --tpm2-device=auto --tpm2-with-pin=yes --tpm2-pcrs=
-                echo "Enrolling recovery key. Save the displayed recovery key now."
-                recovery_key_output=$(target_chroot systemd-cryptenroll "$root_part" --recovery-key)
-                printf '%s\n' "$recovery_key_output"
-                read -rp "Press Enter after saving the recovery key..."
-                printf '%s\n' "$recovery_key_output" | target_chroot runuser -u "$username" -- age -p -o "/home/$username/.luks-recovery-key.age"
-                target_chroot chmod 600 "/home/$username/.luks-recovery-key.age"
-                show_info "The passphrase slot is kept as a fallback. After the first boot unlocks with TPM2+PIN, remove it with: systemd-cryptenroll $root_part --wipe-slot=password"
+                echo "Enrolling TPM2 LUKS key with PIN. The install user's password authorizes enrollment and is removed afterward."
+                target_chroot systemd-cryptenroll "$root_part" \
+                    --wipe-slot=password \
+                    --tpm2-device=auto \
+                    --tpm2-with-pin=yes \
+                    --tpm2-pcrs=
+                show_info "Only TPM2+PIN remains enrolled for LUKS unlock. Add backup methods post-install with systemd-cryptenroll."
                 ;;
             fido2)
                 echo "Insert your FIDO2 key, then press Enter to enroll it with a PIN."
                 read -r
-                target_chroot systemd-cryptenroll "$root_part" --fido2-device=auto --fido2-with-client-pin=yes --fido2-credential-algorithm=eddsa
+                echo "The install user's password authorizes enrollment and is removed afterward."
+                target_chroot systemd-cryptenroll "$root_part" \
+                    --wipe-slot=password \
+                    --fido2-device=auto \
+                    --fido2-with-client-pin=yes \
+                    --fido2-credential-algorithm=eddsa
+                show_info "Only FIDO2+PIN remains enrolled for LUKS unlock. Add backup methods post-install with systemd-cryptenroll."
                 ;;
         esac
     fi

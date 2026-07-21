@@ -27,6 +27,7 @@ BTRFS_SUBVOLUME_MOUNTS=(
 opened_luks=no
 mounted=no
 top_mounted=no
+cleanup_enabled=yes
 
 die() {
     printf 'ERROR: %s\n' "$1" >&2
@@ -42,15 +43,20 @@ confirm() {
 }
 
 cleanup_on_failure() {
+    local status=${1:-$?}
+
+    (( status != 0 )) || return 0
+    [[ "$cleanup_enabled" == yes ]] || return 0
+
     if [[ "$mounted" == yes || "$top_mounted" == yes ]]; then
         umount -R /mnt 2>/dev/null || true
     fi
     if [[ "$opened_luks" == yes ]]; then
         cryptsetup close cryptroot 2>/dev/null || true
     fi
-    exit 1
 }
-trap cleanup_on_failure ERR INT TERM
+trap 'cleanup_on_failure "$?"' EXIT
+trap 'exit 130' INT TERM
 
 partition_path() {
     local disk=$1
@@ -125,7 +131,8 @@ mount_for_repair() {
     select_target
     mount_installed_system
 
-    trap - ERR INT TERM
+    cleanup_enabled=no
+    trap - INT TERM
 
     cat <<EOF
 
@@ -175,7 +182,7 @@ sign_and_verify_ukis() {
 }
 
 replace_root_from_snapshot() {
-    local snapshots selection snapshot old_root
+    local snapshots selection snapshot old_root new_root timestamp
 
     select_target
 
@@ -193,9 +200,22 @@ replace_root_from_snapshot() {
     printf '\nSelected snapshot: %s\n' "$selection"
     confirm 'Replace @ from this snapshot?' || die 'Root replacement cancelled.'
 
-    old_root="@old-$(date +%Y%m%d-%H%M%S)"
+    timestamp=$(date +%Y%m%d-%H%M%S)
+    old_root="@old-$timestamp"
+    new_root="@new-rollback-$timestamp"
+    [[ -d /mnt/@ ]] || die 'Current root subvolume @ was not found.'
+    [[ ! -e "/mnt/$old_root" && ! -e "/mnt/$new_root" ]] || die 'Temporary rollback subvolume name already exists.'
+
+    btrfs subvolume snapshot "/mnt/@snapshots/$snapshot/snapshot" "/mnt/$new_root"
+    [[ -d "/mnt/$new_root" ]] || die 'Replacement root subvolume was not created.'
+
+    trap '' INT TERM
     mv /mnt/@ "/mnt/$old_root"
-    btrfs subvolume snapshot "/mnt/@snapshots/$snapshot/snapshot" /mnt/@
+    if ! mv "/mnt/$new_root" /mnt/@; then
+        mv "/mnt/$old_root" /mnt/@ 2>/dev/null || true
+        die 'Failed to promote replacement root subvolume; original @ was restored if possible.'
+    fi
+    trap 'exit 130' INT TERM
     btrfs subvolume set-default /mnt/@
 
     umount -R /mnt
