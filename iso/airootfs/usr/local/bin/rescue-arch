@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+
+# Guided rescue entry point for systems installed by Arch New Installer.
+# It can either mount the installed system for manual repair or replace the
+# root subvolume (@) from an existing Snapper snapshot.
+
+set -Eeuo pipefail
+
+BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
+BTRFS_SUBVOLUME_MOUNTS=(
+    "@snapshots:/.snapshots"
+    "@home:/home"
+    "@root:/root"
+    "@var_log:/var/log"
+    "@var_cache:/var/cache"
+    "@var_tmp:/var/tmp"
+    "@docker:/var/lib/docker"
+    "@containerd:/var/lib/containerd"
+    "@containers:/var/lib/containers"
+    "@machines:/var/lib/machines"
+    "@sbctl:/var/lib/sbctl"
+    "@tailscale:/var/lib/tailscale"
+    "@netbird:/var/lib/netbird"
+    "@srv:/srv"
+)
+
+opened_luks=no
+mounted=no
+top_mounted=no
+
+die() {
+    printf 'ERROR: %s\n' "$1" >&2
+    exit 1
+}
+
+confirm() {
+    local prompt=$1
+    local answer
+
+    read -rp "$prompt [y/N] " answer
+    [[ "$answer" == y || "$answer" == Y || "$answer" == yes || "$answer" == YES ]]
+}
+
+cleanup_on_failure() {
+    if [[ "$mounted" == yes || "$top_mounted" == yes ]]; then
+        umount -R /mnt 2>/dev/null || true
+    fi
+    if [[ "$opened_luks" == yes ]]; then
+        cryptsetup close cryptroot 2>/dev/null || true
+    fi
+    exit 1
+}
+trap cleanup_on_failure ERR INT TERM
+
+partition_path() {
+    local disk=$1
+    local number=$2
+
+    if [[ "$disk" =~ [0-9]$ ]]; then
+        printf '%sp%s\n' "$disk" "$number"
+    else
+        printf '%s%s\n' "$disk" "$number"
+    fi
+}
+
+select_target() {
+    local devices unlock
+
+    if findmnt -rn /mnt >/dev/null 2>&1; then
+        die '/mnt is already mounted. Unmount it first: umount -R /mnt'
+    fi
+
+    if [[ -e /dev/mapper/cryptroot ]]; then
+        die '/dev/mapper/cryptroot already exists. Close it first: cryptsetup close cryptroot'
+    fi
+
+    devices=$(lsblk --nodeps --paths --list --noheadings --sort=size --output=name,size,type,model | awk '$3 == "disk"')
+    [[ -n "$devices" ]] || die 'No disks found.'
+
+    target_disk=$(printf '%s\n' "$devices" | gum choose --header 'Select the disk your system is installed on:' | awk '{print $1}')
+    efi_part=$(partition_path "$target_disk" 1)
+    root_part=$(partition_path "$target_disk" 2)
+
+    [[ -b "$efi_part" && -b "$root_part" ]] || die "Expected partitions $efi_part and $root_part not found on $target_disk."
+
+    root_device="$root_part"
+    if cryptsetup isLuks "$root_part"; then
+        unlock=$(gum choose --header "How do you want to unlock $root_part?" \
+            'FIDO2 or TPM2 token (with PIN)' \
+            'Passphrase or recovery key')
+        if [[ "$unlock" == 'FIDO2 or TPM2 token (with PIN)' ]]; then
+            echo 'If you enrolled a FIDO2 key, insert it now. You will be asked for your PIN.'
+            cryptsetup open --token-only "$root_part" cryptroot
+        else
+            cryptsetup open --disable-external-tokens "$root_part" cryptroot
+        fi
+        opened_luks=yes
+        root_device=/dev/mapper/cryptroot
+    fi
+}
+
+mount_installed_system() {
+    local subvolume_mount subvolume mountpoint
+
+    mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
+    mounted=yes
+
+    for subvolume_mount in "${BTRFS_SUBVOLUME_MOUNTS[@]}"; do
+        subvolume=${subvolume_mount%%:*}
+        mountpoint=${subvolume_mount#*:}
+        install -d -m 0755 "/mnt$mountpoint"
+        mount -o "$BTRFS_MOUNT_OPTIONS,subvol=$subvolume" "$root_device" "/mnt$mountpoint"
+    done
+    chmod 0700 /mnt/root
+    chmod 1777 /mnt/var/tmp
+
+    if [[ -d /mnt/efi ]]; then
+        mount -o fmask=0137,dmask=0027 "$efi_part" /mnt/efi
+    else
+        echo 'WARNING: /mnt/efi does not exist on the target; skipping the ESP mount.' >&2
+    fi
+}
+
+mount_for_repair() {
+    select_target
+    mount_installed_system
+
+    trap - ERR INT TERM
+
+    cat <<EOF
+
+Your system is unlocked and mounted at /mnt.
+
+Enter the installed system:
+
+    arch-chroot /mnt
+
+When you are finished:
+
+    umount -R /mnt
+EOF
+
+    if [[ "$opened_luks" == yes ]]; then
+        printf '    cryptsetup close cryptroot\n'
+    fi
+    echo ''
+}
+
+list_snapshots() {
+    local snapshot_dir entry info description
+
+    snapshot_dir=/mnt/@snapshots
+    [[ -d "$snapshot_dir" ]] || die '@snapshots was not found.'
+
+    for entry in "$snapshot_dir"/*; do
+        [[ -d "$entry/snapshot" ]] || continue
+        description=''
+        info="$entry/info.xml"
+        if [[ -f "$info" ]]; then
+            description=$(grep -m1 '<description>' "$info" | sed -E 's/.*<description>(.*)<\/description>.*/\1/' || true)
+        fi
+        printf '%s %s\n' "${entry##*/}" "$description"
+    done | sort -n
+}
+
+sign_and_verify_ukis() {
+    if arch-chroot /mnt bash -lc 'command -v sbctl >/dev/null 2>&1 && [[ -d /var/lib/sbctl/keys ]]'; then
+        arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-linux.efi
+        arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-linux-lts.efi
+        if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
+            arch-chroot /mnt sbctl sign -s /usr/lib/fwupd/efi/fwupdx64.efi
+        fi
+        arch-chroot /mnt sbctl verify
+    fi
+}
+
+replace_root_from_snapshot() {
+    local snapshots selection snapshot old_root
+
+    select_target
+
+
+    mount -o "$BTRFS_MOUNT_OPTIONS,subvolid=5" "$root_device" /mnt
+    top_mounted=yes
+
+    snapshots=$(list_snapshots)
+    [[ -n "$snapshots" ]] || die 'No Snapper snapshots found.'
+
+    selection=$(printf '%s\n' "$snapshots" | gum choose --header 'Select the snapshot to restore as @:')
+    snapshot=${selection%% *}
+    [[ -d "/mnt/@snapshots/$snapshot/snapshot" ]] || die "Snapshot $snapshot is invalid."
+
+    printf '\nSelected snapshot: %s\n' "$selection"
+    confirm 'Replace @ from this snapshot?' || die 'Root replacement cancelled.'
+
+    old_root="@old-$(date +%Y%m%d-%H%M%S)"
+    mv /mnt/@ "/mnt/$old_root"
+    btrfs subvolume snapshot "/mnt/@snapshots/$snapshot/snapshot" /mnt/@
+    btrfs subvolume set-default /mnt/@
+
+    umount -R /mnt
+    top_mounted=no
+
+    mount_installed_system
+    arch-chroot /mnt mkinitcpio -P
+    sign_and_verify_ukis
+
+    umount -R /mnt
+    mounted=no
+
+    if [[ "$opened_luks" == yes ]]; then
+        cryptsetup close cryptroot
+        opened_luks=no
+    fi
+
+    cat <<EOF
+
+Root replacement complete.
+
+The previous root was kept as: $old_root
+
+Delete it manually later after booting successfully:
+
+    sudo mount -o subvolid=5 $root_device /mnt
+    sudo btrfs subvolume delete /mnt/$old_root
+    sudo umount /mnt
+EOF
+
+    if confirm 'Reboot now?'; then
+        systemctl reboot
+    fi
+}
+
+if [[ ${EUID:-0} -ne 0 ]]; then
+    die 'This script must be run as root.'
+fi
+
+action=$(gum choose --header 'Rescue action:' \
+    'Mount installation and enter a repair shell' \
+    'Replace @ from a Snapper snapshot')
+
+case "$action" in
+    'Mount installation and enter a repair shell') mount_for_repair ;;
+    'Replace @ from a Snapper snapshot') replace_root_from_snapshot ;;
+esac

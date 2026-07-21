@@ -1,0 +1,45 @@
+# Minimal audit rules for high-value security events.
+# Apply with: augenrules --load
+
+# Buffer and failure mode
+-b 8192
+-f 1
+
+# Identity and authentication changes
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/sudoers -p wa -k identity
+-w /etc/sudoers.d/ -p wa -k identity
+
+# Privilege escalation
+-w /bin/su -p x -k privileged
+-w /usr/bin/sudo -p x -k privileged
+-w /usr/bin/newgrp -p x -k privileged
+-a always,exit -F arch=b64 -S setuid -S setgid -S setreuid -S setregid -k privilege_escalation
+-a always,exit -F arch=b64 -S execve -F euid=0 -F auid>=1000 -F auid!=4294967295 -k privilege_escalation
+
+# Filesystem mount events
+-a always,exit -F arch=b64 -S mount -k mounts
+-a always,exit -F arch=b32 -S mount -k mounts
+
+# File deletion by users
+-a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
+-a always,exit -F arch=b32 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
+
+# Kernel module loading/unloading
+-w /sbin/insmod -p x -k modules
+-w /sbin/rmmod -p x -k modules
+-w /sbin/modprobe -p x -k modules
+-a always,exit -F arch=b64 -S init_module -S finit_module -S delete_module -k modules
+
+# System time changes
+-a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
+-a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
+-w /etc/localtime -p wa -k time-change
+
+# Network identity changes
+-a always,exit -F arch=b64 -S sethostname -S setdomainname -k system-locale
+-w /etc/hosts -p wa -k system-locale
+-w /etc/hostname -p wa -k system-locale

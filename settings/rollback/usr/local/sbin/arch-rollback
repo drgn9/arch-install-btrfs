@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+CONFIG=root
+PACMAN_LOCK=/var/lib/pacman/db.lck
+
+die() {
+    printf 'ERROR: %s\n' "$1" >&2
+    exit 1
+}
+
+pacman_running() {
+    pgrep -x pacman >/dev/null 2>&1 || pgrep -x pacstrap >/dev/null 2>&1 || pgrep -x yay >/dev/null 2>&1
+}
+
+confirm() {
+    local prompt=$1
+    local answer
+
+    read -rp "$prompt [y/N] " answer
+    [[ "$answer" == y || "$answer" == Y || "$answer" == yes || "$answer" == YES ]]
+}
+
+ensure_ready() {
+    [[ ${EUID:-0} -eq 0 ]] || die 'arch-rollback must be run as root.'
+    [[ "$(findmnt -no FSTYPE /)" == btrfs ]] || die '/ is not mounted as Btrfs.'
+    findmnt -rn /.snapshots >/dev/null 2>&1 || die '/.snapshots is not mounted.'
+    pacman_running && die 'pacman, pacstrap, or yay is currently running.'
+    [[ ! -e "$PACMAN_LOCK" ]] || die "$PACMAN_LOCK exists. Remove it only after verifying pacman is not running."
+}
+
+list_pairs() {
+    snapper -c "$CONFIG" --csvout --separator '|' --no-headers list \
+        --type pre-post --disable-used-space \
+        --columns number,type,pre-number,date,description |
+        awk -F'|' '$2 == "post" && $3 ~ /^[0-9]+$/ && $1 ~ /^[0-9]+$/ { printf "%s|%s|%s|%s\n", $3, $1, $4, $5 }'
+}
+
+select_pair() {
+    local pairs=()
+    local line index choice
+
+    mapfile -t pairs < <(list_pairs | sort -t'|' -k2,2nr)
+    (( ${#pairs[@]} > 0 )) || die 'No Snapper pre/post pairs found.'
+
+    printf '\nRecent pacman transactions:\n\n'
+    index=1
+    for line in "${pairs[@]:0:20}"; do
+        IFS='|' read -r pre post date description <<<"$line"
+        printf '%2d. %s..%s  %s  %s\n' "$index" "$pre" "$post" "$date" "$description"
+        ((index++))
+    done
+
+    read -rp $'\nSelect transaction: ' choice
+    [[ "$choice" =~ ^[0-9]+$ ]] || die 'Selection must be a number.'
+    (( choice >= 1 && choice < index )) || die 'Selection out of range.'
+
+    IFS='|' read -r selected_pre selected_post _ <<<"${pairs[$((choice - 1))]}"
+}
+
+show_change_summary() {
+    local status_file=$1
+    local created deleted modified
+
+    created=$(awk '$1 ~ /^\+/ { count++ } END { print count + 0 }' "$status_file")
+    deleted=$(awk '$1 ~ /^-/ { count++ } END { print count + 0 }' "$status_file")
+    modified=$(awk '$1 !~ /^[+-]/ { count++ } END { print count + 0 }' "$status_file")
+
+    printf '\nChanges:\n'
+    printf '  modify: %s\n' "$modified"
+    printf '  create: %s\n' "$created"
+    printf '  delete: %s\n' "$deleted"
+}
+
+sign_and_verify_ukis() {
+    if command -v sbctl >/dev/null 2>&1 && [[ -d /var/lib/sbctl/keys ]]; then
+        sbctl sign -s /efi/EFI/Linux/arch-linux.efi
+        sbctl sign -s /efi/EFI/Linux/arch-linux-lts.efi
+        if [[ -f /usr/lib/fwupd/efi/fwupdx64.efi ]]; then
+            sbctl sign -s /usr/lib/fwupd/efi/fwupdx64.efi
+        fi
+        sbctl verify
+    fi
+}
+
+ensure_ready
+
+if (( $# == 0 )); then
+    select_pair
+elif (( $# == 2 )); then
+    [[ "$1" =~ ^[0-9]+$ && "$2" =~ ^[0-9]+$ ]] || die 'Snapshot numbers must be numeric.'
+    selected_pre=$1
+    selected_post=$2
+else
+    die 'Usage: arch-rollback [PRE POST]'
+fi
+
+status_file=$(mktemp)
+trap 'rm -f "$status_file"' EXIT
+
+snapper -c "$CONFIG" status "$selected_pre..$selected_post" >"$status_file"
+show_change_summary "$status_file"
+
+printf '\n'
+cat "$status_file"
+printf '\n'
+
+confirm "Undo transaction $selected_pre..$selected_post?" || die 'Rollback cancelled.'
+
+snapper -c "$CONFIG" undochange "$selected_pre..$selected_post"
+
+if [[ -e "$PACMAN_LOCK" ]] && ! pacman_running; then
+    rm -f "$PACMAN_LOCK"
+fi
+
+mkinitcpio -P
+sign_and_verify_ukis
+
+cat <<'EOF'
+
+Rollback finished.
+
+This is a file-level reversal of one pacman transaction, not a complete
+system downgrade. If you reversed a partial upgrade or a kernel/userspace
+boundary, reboot now and inspect the system.
+EOF
+
+if confirm 'Reboot now?'; then
+    systemctl reboot
+fi

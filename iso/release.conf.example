@@ -1,0 +1,21 @@
+# Release targets for iso/release.sh.
+#
+# Copy this file to iso/release.conf, then uncomment and fill in the targets
+# you use. A target whose settings are commented out is skipped. release.conf
+# is gitignored because it holds the Forgejo token; keep it chmod 600.
+
+# GitHub release.
+# Requires: github-cli installed and authenticated (gh auth login),
+# and the repo pushed to GitHub.
+#GITHUB_REPO="you/arch-new-install"
+
+# Forgejo release.
+# Token: Forgejo -> Settings -> Applications -> Access Tokens (repository write).
+#FORGEJO_URL="https://forgejo.example.com"
+#FORGEJO_REPO="you/arch-new-install"
+#FORGEJO_TOKEN="changeme"
+
+# Cloudflare R2 (or any S3-compatible bucket) via rclone.
+# Requires: an rclone remote configured with your R2 API token.
+#R2_REMOTE="r2"
+#R2_BUCKET="arch-iso"

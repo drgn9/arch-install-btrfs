@@ -1,0 +1,3 @@
+MODULES=(btrfs usbhid xhci_hcd hid-generic)
+FILES=()
+HOOKS=(base systemd keyboard autodetect microcode modconf kms sd-vconsole block sd-encrypt filesystems fsck)

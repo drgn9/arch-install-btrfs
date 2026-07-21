@@ -1,0 +1,13 @@
+
+Arch New Installer live environment.
+
+To begin the guided installation, type:
+
+    install-arch
+
+To repair an existing installation or replace @ from a Snapper snapshot, type:
+
+    rescue-arch
+
+The installer checks for internet access first and will walk you
+through connecting to Wi-Fi if needed.

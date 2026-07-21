@@ -1,0 +1,20 @@
+[Match]
+Type=wlan
+SSID=titan9 titan9-2G titan9-guest
+
+[Link]
+RequiredForOnline=routable
+
+[Network]
+DHCP=yes
+IgnoreCarrierLoss=3s
+DNSOverTLS=no
+
+[DHCPv4]
+UseDNS=true
+Anonymize=true
+RouteMetric=20
+
+[DHCPv6]
+UseDNS=true
+RouteMetric=20
