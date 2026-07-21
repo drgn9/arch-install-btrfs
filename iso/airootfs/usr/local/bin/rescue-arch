@@ -7,22 +7,6 @@
 set -Eeuo pipefail
 
 BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
-BTRFS_SUBVOLUME_MOUNTS=(
-    "@snapshots:/.snapshots"
-    "@home:/home"
-    "@root:/root"
-    "@var_log:/var/log"
-    "@var_cache:/var/cache"
-    "@var_tmp:/var/tmp"
-    "@docker:/var/lib/docker"
-    "@containerd:/var/lib/containerd"
-    "@containers:/var/lib/containers"
-    "@machines:/var/lib/machines"
-    "@sbctl:/var/lib/sbctl"
-    "@tailscale:/var/lib/tailscale"
-    "@netbird:/var/lib/netbird"
-    "@srv:/srv"
-)
 
 opened_luks=no
 mounted=no
@@ -106,17 +90,9 @@ select_target() {
 }
 
 mount_installed_system() {
-    local subvolume_mount subvolume mountpoint
-
     mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
     mounted=yes
 
-    for subvolume_mount in "${BTRFS_SUBVOLUME_MOUNTS[@]}"; do
-        subvolume=${subvolume_mount%%:*}
-        mountpoint=${subvolume_mount#*:}
-        install -d -m 0755 "/mnt$mountpoint"
-        mount -o "$BTRFS_MOUNT_OPTIONS,subvol=$subvolume" "$root_device" "/mnt$mountpoint"
-    done
     chmod 0700 /mnt/root
     chmod 1777 /mnt/var/tmp
 
@@ -136,11 +112,16 @@ mount_for_repair() {
 
     cat <<EOF
 
-Your system is unlocked and mounted at /mnt.
+Your root subvolume is mounted at /mnt.
+The ESP is mounted at /mnt/efi when present.
 
 Enter the installed system:
 
     arch-chroot /mnt
+
+Inside the chroot, mount the remaining fstab entries if needed:
+
+    mount -a
 
 When you are finished:
 

@@ -18,7 +18,10 @@ BTRFS_SUBVOLUMES=(
     @containerd
     @containers
     @machines
+    @flatpak
+    @libvirt
     @sbctl
+    @iwd
     @tailscale
     @netbird
     @srv
@@ -34,7 +37,10 @@ BTRFS_SUBVOLUME_MOUNTS=(
     "@containerd:/var/lib/containerd"
     "@containers:/var/lib/containers"
     "@machines:/var/lib/machines"
+    "@flatpak:/var/lib/flatpak"
+    "@libvirt:/var/lib/libvirt"
     "@sbctl:/var/lib/sbctl"
+    "@iwd:/var/lib/iwd"
     "@tailscale:/var/lib/tailscale"
     "@netbird:/var/lib/netbird"
     "@srv:/srv"
@@ -58,58 +64,27 @@ have_network() {
     fi
 }
 
-connect_wifi_guided() {
-    local device ssid passphrase attempt
-    local wifi_devices=()
+connect_wifi_tui() {
+    local attempt
 
-    if ! command -v iwctl &>/dev/null; then
-        echo "iwctl is not available. Connect to the network manually, then choose re-check." >&2
+    if ! command -v impala &>/dev/null; then
+        echo "impala is not available. Connect manually, then choose re-check." >&2
         return 1
     fi
 
     rfkill unblock wifi 2>/dev/null || true
+    systemctl start iwd.service 2>/dev/null || true
 
-    mapfile -t wifi_devices < <(iwctl device list | sed 's/\x1b\[[0-9;]*m//g' | awk 'NR > 4 && NF { print $1 }')
-    if (( ${#wifi_devices[@]} == 0 )); then
-        echo "No wireless devices found." >&2
-        return 1
-    fi
+    impala || return 1
 
-    device=${wifi_devices[0]}
-    if (( ${#wifi_devices[@]} > 1 )); then
-        echo "Wireless devices: ${wifi_devices[*]}"
-        read -rp "Device to use [${wifi_devices[0]}]: " device
-        device=${device:-${wifi_devices[0]}}
-    fi
-
-    echo "Scanning for networks on $device..."
-    iwctl station "$device" scan 2>/dev/null || true
-    sleep 4
-    iwctl station "$device" get-networks || true
-
-    read -rp "Network name (SSID): " ssid
-    if [[ -z "$ssid" ]]; then
-        echo "No network name entered." >&2
-        return 1
-    fi
-    read -rsp "Passphrase (leave empty for an open network): " passphrase
-    echo ""
-
-    if [[ -n "$passphrase" ]]; then
-        iwctl --passphrase "$passphrase" station "$device" connect "$ssid"
-    else
-        iwctl station "$device" connect "$ssid"
-    fi
-    unset passphrase
-
-    echo "Waiting for the connection to come up..."
+    echo "Waiting for internet access..."
     for ((attempt = 0; attempt < 15; attempt++)); do
         if have_network; then
             return 0
         fi
         sleep 2
     done
-    echo "Connected to $ssid but no internet access yet." >&2
+    echo "impala exited, but internet access was not detected yet." >&2
     return 1
 }
 
@@ -124,12 +99,12 @@ ensure_network() {
     while ! have_network; do
         echo ""
         echo "No internet connection detected. The installer needs internet to download packages."
-        echo "  1) Connect to Wi-Fi (guided)"
+        echo "  1) Open Wi-Fi manager (impala)"
         echo "  2) Re-check (choose this after plugging in an ethernet cable)"
         echo "  3) Abort"
         read -rp "Choice [1]: " choice
         case "${choice:-1}" in
-            1) connect_wifi_guided || echo "Wi-Fi setup did not succeed. Try again." >&2 ;;
+            1) connect_wifi_tui || echo "Wi-Fi setup did not succeed. Try again." >&2 ;;
             2) ;;
             3) exit 1 ;;
             *) echo "Enter 1, 2 or 3." >&2 ;;
@@ -151,13 +126,13 @@ echo "Refreshing pacman databases and archlinux-keyring"
 pacman -Sy --needed --noconfirm archlinux-keyring
 
 deps_needed=()
-for dep in gum cryptsetup efibootmgr sfdisk wipefs blkdiscard partprobe mkfs.fat mkfs.btrfs btrfs lspci pacstrap arch-chroot genfstab; do
+for dep in gum impala cryptsetup efibootmgr sfdisk wipefs blkdiscard partprobe mkfs.fat mkfs.btrfs btrfs lspci pacstrap arch-chroot genfstab; do
     command -v "$dep" &>/dev/null || deps_needed+=("$dep")
 done
 
 if [[ ${#deps_needed[@]} -gt 0 ]]; then
     echo "Installing live environment dependencies: ${deps_needed[*]}"
-    pacman -S --needed --noconfirm gum cryptsetup efibootmgr util-linux dosfstools btrfs-progs parted pciutils arch-install-scripts
+    pacman -S --needed --noconfirm gum impala cryptsetup efibootmgr util-linux dosfstools btrfs-progs parted pciutils arch-install-scripts
 fi
 
 show_header() {

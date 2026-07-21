@@ -1,5 +1,6 @@
 git
 gum
+impala
 btrfs-progs
 snapper
-restic
+rsync

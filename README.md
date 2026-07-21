@@ -58,7 +58,10 @@ The Btrfs filesystem uses sibling subvolumes:
 | `@containerd` | `/var/lib/containerd` |
 | `@containers` | `/var/lib/containers` |
 | `@machines` | `/var/lib/machines` |
+| `@flatpak` | `/var/lib/flatpak` |
+| `@libvirt` | `/var/lib/libvirt` |
 | `@sbctl` | `/var/lib/sbctl` |
+| `@iwd` | `/var/lib/iwd` |
 | `@tailscale` | `/var/lib/tailscale` |
 | `@netbird` | `/var/lib/netbird` |
 | `@srv` | `/srv` |
@@ -162,16 +165,16 @@ git clone <repo-url>
 bash arch-new-install/install.bash
 ```
 
-The installer checks for internet access before touching anything and offers a guided iwd Wi-Fi connection if the system is offline.
+The installer checks for internet access before touching anything and opens the `impala` Wi-Fi TUI if the system is offline.
 
 Review every prompt carefully. The selected target disk is destroyed.
 
 ## Custom Live ISO
 
-`iso/build.sh` builds a custom Arch live ISO with this installer baked in. The live environment boots with the repo at `/root/arch-new-install`, `gum`, `git`, `btrfs-progs`, `snapper`, and `restic` preinstalled, and a login message pointing at two launcher commands:
+`iso/build.sh` builds a custom Arch live ISO with this installer baked in. The live environment boots with the repo at `/root/arch-new-install`, `gum`, `impala`, `git`, `btrfs-progs`, `snapper`, and `rsync` preinstalled, and a login message pointing at two launcher commands:
 
-- `install-arch` — runs the installer. No network is needed until package download starts, and the installer's guided Wi-Fi flow covers wireless setup.
-- `rescue-arch` — guided repair/rollback entry point for an existing installation. It can mount the Btrfs subvolumes and ESP at `/mnt` for manual repair, or replace `@` from a selected Snapper snapshot and rebuild/sign/verify UKIs.
+- `install-arch` — runs the installer. No network is needed until package download starts, and the installer's `impala` Wi-Fi flow covers wireless setup.
+- `rescue-arch` — guided repair/rollback entry point for an existing installation. It can mount the root subvolume and ESP at `/mnt` for manual repair, or replace `@` from a selected Snapper snapshot and rebuild/sign/verify UKIs. Run `mount -a` inside the chroot if you need the remaining fstab entries mounted.
 
 Build (as root, on an Arch Linux machine):
 
