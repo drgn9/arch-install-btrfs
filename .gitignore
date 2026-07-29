@@ -1,2 +1,29 @@
+# Archiso and release output
 iso/out/
 iso/release.conf
+
+# Generated installer artifacts
+artifacts/
+
+# mkosi output, caches, local overrides, and temporary credentials
+rescue-uki/mkosi.output/
+rescue-uki/mkosi.cache/
+rescue-uki/mkosi.local/
+rescue-uki/mkosi.local.conf
+rescue-uki/mkosi.builddir/
+rescue-uki/mkosi.workspace/
+rescue-uki/.mkosi-private/
+rescue-uki/mkosi.rootpw
+rescue-uki/mkosi.passphrase
+rescue-uki/mkosi.credentials/
+rescue-uki/*.efi
+rescue-uki/*.efi.*
+rescue-uki/*.raw
+rescue-uki/*.raw.*
+rescue-uki/*.tar
+rescue-uki/*.tar.*
+rescue-uki/*.manifest
+rescue-uki/*.changelog
+rescue-uki/*.sha256
+rescue-uki/*.bmap
+rescue-uki/mkosi.extra/usr/local/bin/rescue-arch

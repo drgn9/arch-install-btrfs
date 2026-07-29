@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# shellcheck source=/dev/null
+source "${BUILDROOT}/etc/os-release"
+echo "Finalizing os-release"
+echo "PRETTY_NAME=\"${NAME} (${VARIANT:-Rescue Image} ${IMAGE_VERSION:-n/a})\"" >>"${BUILDROOT}/etc/os-release"

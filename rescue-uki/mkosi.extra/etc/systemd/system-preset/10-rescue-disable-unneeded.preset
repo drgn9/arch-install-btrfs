@@ -1,0 +1,7 @@
+disable systemd-homed.service
+disable systemd-homed-activate.service
+disable systemd-userdbd.socket
+disable systemd-boot-update.service
+disable systemd-tpm2-clear.service
+disable systemd-sysext.service
+disable systemd-confext.service

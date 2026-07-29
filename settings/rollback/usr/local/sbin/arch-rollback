@@ -77,6 +77,9 @@ sign_and_verify_ukis() {
     if command -v sbctl >/dev/null 2>&1 && [[ -d /var/lib/sbctl/keys ]]; then
         sbctl sign -s /efi/EFI/Linux/arch-linux.efi
         sbctl sign -s /efi/EFI/Linux/arch-linux-lts.efi
+        if [[ -f /efi/EFI/Linux/arch-rescue.efi ]]; then
+            sbctl sign -s /efi/EFI/Linux/arch-rescue.efi
+        fi
         if [[ -f /usr/lib/fwupd/efi/fwupdx64.efi ]]; then
             sbctl sign -s /usr/lib/fwupd/efi/fwupdx64.efi
         fi

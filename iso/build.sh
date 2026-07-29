@@ -13,6 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 OUT_DIR="$SCRIPT_DIR/out"
 RELENG_DIR=/usr/share/archiso/configs/releng
+RESCUE_UKI_ARTIFACT="$REPO_DIR/artifacts/arch-rescue.efi"
 
 if [[ ${EUID:-0} -ne 0 ]]; then
     echo "ERROR: This script must be run as root (mkarchiso requires it)." >&2
@@ -26,6 +27,13 @@ fi
 
 if [[ ! -d "$RELENG_DIR" ]]; then
     echo "ERROR: $RELENG_DIR not found. Is the archiso package installed correctly?" >&2
+    exit 1
+fi
+
+echo "Building rescue UKI artifact..."
+"$REPO_DIR/rescue-uki/build.sh"
+if [[ ! -f "$RESCUE_UKI_ARTIFACT" ]]; then
+    echo "ERROR: Rescue UKI artifact was not created: $RESCUE_UKI_ARTIFACT" >&2
     exit 1
 fi
 
@@ -49,6 +57,10 @@ cat "$SCRIPT_DIR/packages.x86_64" >>"$PROFILE_DIR/packages.x86_64"
 mkdir -p "$PROFILE_DIR/airootfs/root/arch-new-install"
 rsync -a --delete --filter=':- .gitignore' --exclude '.git' \
     "$REPO_DIR/" "$PROFILE_DIR/airootfs/root/arch-new-install/"
+
+# artifacts/ is gitignored, so copy the generated rescue UKI explicitly.
+install -D -m 0644 "$RESCUE_UKI_ARTIFACT" \
+    "$PROFILE_DIR/airootfs/root/arch-new-install/artifacts/arch-rescue.efi"
 
 # Launcher commands and login message
 install -D -m 0755 "$SCRIPT_DIR/airootfs/usr/local/bin/install-arch" \

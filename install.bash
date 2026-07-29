@@ -5,6 +5,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETTINGS_DIR="$SCRIPT_DIR/settings"
+RESCUE_UKI_SOURCE="$SCRIPT_DIR/artifacts/arch-rescue.efi"
+RESCUE_UKI_TARGET=/efi/EFI/Linux/arch-rescue.efi
 BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
 BTRFS_SUBVOLUMES=(
     @
@@ -270,6 +272,14 @@ preflight_validate_packages() {
     fi
 }
 
+preflight_validate_rescue_uki() {
+    if [[ ! -f "$RESCUE_UKI_SOURCE" ]]; then
+        show_error "Missing rescue UKI artifact: $RESCUE_UKI_SOURCE"
+        show_error "Build the installer ISO with ./iso/build.sh so artifacts/arch-rescue.efi is included."
+        exit 1
+    fi
+}
+
 install_selected_packages() {
     local packages=()
     local package
@@ -479,6 +489,7 @@ EOF
     fi
 
     install -d -m 0755 /mnt/boot /mnt/efi/EFI/Linux /mnt/etc/cmdline.d /mnt/etc/mkinitcpio.d
+    install -D -m 0644 "$RESCUE_UKI_SOURCE" "/mnt$RESCUE_UKI_TARGET"
 
     copy_settings_file boot /etc/cmdline.d/defaults.conf
     copy_settings_file boot /etc/cmdline.d/security.conf
@@ -523,6 +534,8 @@ EOF
 
     delete_boot_entries_by_label "arch-linux"
     delete_boot_entries_by_label "arch-linux-lts"
+    delete_boot_entries_by_label "arch-rescue"
+    target_chroot efibootmgr --create --disk "$target_disk" --part 1 --label "arch-rescue" --loader "\\EFI\\Linux\\arch-rescue.efi" --unicode
     target_chroot efibootmgr --create --disk "$target_disk" --part 1 --label "arch-linux-lts" --loader "\\EFI\\Linux\\arch-linux-lts.efi" --unicode
     target_chroot efibootmgr --create --disk "$target_disk" --part 1 --label "arch-linux" --loader "\\EFI\\Linux\\arch-linux.efi" --unicode
 
@@ -589,6 +602,7 @@ EOF
             target_chroot sbctl enroll-keys -m
             target_chroot sbctl sign -s /efi/EFI/Linux/arch-linux.efi
             target_chroot sbctl sign -s /efi/EFI/Linux/arch-linux-lts.efi
+            target_chroot sbctl sign -s "$RESCUE_UKI_TARGET"
             if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
                 target_chroot sbctl sign -s /usr/lib/fwupd/efi/fwupdx64.efi
             fi
@@ -718,6 +732,7 @@ validate_disk_target "$target_disk"
 detect_gpu_package_files
 collect_selected_packages
 preflight_validate_packages
+preflight_validate_rescue_uki
 
 wipe_mode=none
 if gum confirm "Securely wipe $target_disk before partitioning? This can take a long time."; then

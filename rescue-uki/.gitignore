@@ -1,0 +1,22 @@
+# mkosi output, caches, local overrides, and temporary credentials
+mkosi.output/
+mkosi.cache/
+mkosi.local/
+mkosi.local.conf
+mkosi.builddir/
+mkosi.workspace/
+.mkosi-private/
+mkosi.rootpw
+mkosi.passphrase
+mkosi.credentials/
+*.efi
+*.efi.*
+*.raw
+*.raw.*
+*.tar
+*.tar.*
+*.manifest
+*.changelog
+*.sha256
+*.bmap
+mkosi.extra/usr/local/bin/rescue-arch
