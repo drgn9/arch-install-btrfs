@@ -27,7 +27,7 @@ Install-time workflow:
 USB installer boots
 install.bash runs current first-time install flow
 install.bash copies prebuilt arch-rescue.efi to target ESP
-install.bash signs arch-rescue.efi with target sbctl keys when Secure Boot is configured
+install.bash signs arch-rescue.efi with target sbctl keys
 install.bash creates arch-rescue EFI boot entry
 ```
 
@@ -36,8 +36,8 @@ Rescue-time workflow:
 ```text
 firmware boots /efi/EFI/Linux/arch-rescue.efi
 rescue environment starts
-user runs rescue-arch
-existing rescue-arch script provides rollback/chroot repair
+user runs rescue-root
+existing rescue-root script provides rollback/chroot repair
 ```
 
 ## Non-Negotiables
@@ -48,7 +48,7 @@ existing rescue-arch script provides rollback/chroot repair
 - Do not require users to run a separate rescue UKI build command.
 - Do not leave `mkosi.rootpw` behind after the build.
 - Do not create a duplicate rescue script.
-- Reuse the existing `iso/airootfs/usr/local/bin/rescue-arch` script.
+- Reuse the existing `iso/airootfs/usr/local/bin/rescue-root` script.
 - Do not implement `rescue-reinstall.bash` in V1.
 - Do not embed Secure Boot private keys in the rescue UKI or ISO.
 - Keep the current USB install flow intact.
@@ -72,7 +72,7 @@ rescue-uki/
 │   └── usr/
 │       └── local/
 │           └── bin/
-│               └── rescue-arch
+│               └── rescue-root
 ├── mkosi.finalize
 ├── mkosi.postinst.chroot
 ├── mkosi.version
@@ -140,8 +140,8 @@ rsync
 8. Copy/sync the existing rescue script into the mkosi overlay:
 
 ```text
-iso/airootfs/usr/local/bin/rescue-arch
--> rescue-uki/mkosi.extra/usr/local/bin/rescue-arch
+iso/airootfs/usr/local/bin/rescue-root
+-> rescue-uki/mkosi.extra/usr/local/bin/rescue-root
 ```
 
 9. Run:
@@ -264,13 +264,13 @@ Arch rescue UKI.
 
 Run:
 
-    rescue-arch
+    rescue-root
 
 For Wi-Fi setup, run:
 
     impala
 
-For manual repair, rescue-arch can mount the installed system at /mnt.
+For manual repair, rescue-root can mount the installed system at /mnt.
 ```
 
 System presets:
@@ -458,7 +458,6 @@ Sign order:
 
 ```text
 /efi/EFI/Linux/arch-linux.efi
-/efi/EFI/Linux/arch-linux-lts.efi
 /efi/EFI/Linux/arch-rescue.efi
 optional fwupd binary
 ```
@@ -479,12 +478,12 @@ Do not build the rescue UKI in `install.bash`.
 
 Do not run `mkosi` in the target chroot.
 
-## Existing rescue-arch Reuse
+## Existing rescue-root Reuse
 
 There must remain one source rescue script:
 
 ```text
-iso/airootfs/usr/local/bin/rescue-arch
+iso/airootfs/usr/local/bin/rescue-root
 ```
 
 The rescue UKI build should copy that script into its image.
@@ -498,13 +497,13 @@ V1 should not fork the script into two divergent copies.
 After implementation, run:
 
 ```bash
-bash -n install.bash iso/build.sh rescue-uki/build.sh iso/release.sh iso/airootfs/usr/local/bin/rescue-arch iso/airootfs/usr/local/bin/install-arch
+bash -n install.bash iso/build.sh rescue-uki/build.sh iso/release.sh iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch
 ```
 
 If available:
 
 ```bash
-shellcheck install.bash iso/build.sh rescue-uki/build.sh iso/release.sh iso/airootfs/usr/local/bin/rescue-arch iso/airootfs/usr/local/bin/install-arch
+shellcheck install.bash iso/build.sh rescue-uki/build.sh iso/release.sh iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch
 ```
 
 Build rescue UKI and USB ISO with the single supported build command:
@@ -537,7 +536,6 @@ VM first.
 
 ```text
 /efi/EFI/Linux/arch-linux.efi
-/efi/EFI/Linux/arch-linux-lts.efi
 /efi/EFI/Linux/arch-rescue.efi
 ```
 
@@ -545,7 +543,6 @@ VM first.
 
 ```text
 arch-linux
-arch-linux-lts
 arch-rescue
 ```
 
@@ -553,7 +550,7 @@ arch-rescue
 7. Boot normal system.
 8. Reboot into `arch-rescue` firmware entry.
 9. Confirm rescue root login works.
-10. Confirm `rescue-arch` exists.
+10. Confirm `rescue-root` exists.
 11. Test manual repair mount.
 12. Test chroot entry.
 13. Test snapshot replacement in a controlled VM.
@@ -570,7 +567,7 @@ If rescue UKI integration causes problems:
 3. Stop creating `arch-rescue` boot entry.
 4. Leave the standalone `rescue-uki/` build system in place for later testing.
 
-This rollback must not affect the normal `arch-linux` and `arch-linux-lts` install flow.
+This rollback must not affect the normal `arch-linux` install flow.
 
 ## Future V2 Notes
 

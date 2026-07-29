@@ -167,7 +167,6 @@ cleanup() {
     show_error "Installation failed at line $line (exit $status): $command"
     rm -f /mnt/etc/sudoers.d/99-installer-aur-nopasswd 2>/dev/null || true
     umount -R /mnt 2>/dev/null || true
-    cryptsetup close to_be_wiped 2>/dev/null || true
     cryptsetup close cryptroot 2>/dev/null || true
     exit "$status"
 }
@@ -246,9 +245,6 @@ collect_selected_packages() {
 
     selected_package_files=(packages/base.conf packages/desktop-base.conf packages/desktop-niri.conf)
     selected_package_files+=("${gpu_package_files[@]}")
-    if [[ "$use_docker_packages" == "yes" ]]; then
-        selected_package_files+=(packages/base-docker.conf)
-    fi
 
     for file in "${selected_package_files[@]}"; do
         if [[ ! -f "$SCRIPT_DIR/$file" ]]; then
@@ -265,8 +261,10 @@ collect_selected_packages() {
 }
 
 preflight_validate_packages() {
-    show_info "Validating ${#selected_packages[@]} package names from: ${selected_package_files[*]}"
-    if ! pacman -Sp --print-format '%n' "${selected_packages[@]}" >/dev/null; then
+    local packages=("${selected_packages[@]}" snap-pac)
+
+    show_info "Validating ${#packages[@]} package names from: ${selected_package_files[*]} plus deferred snap-pac"
+    if ! pacman -Sp --print-format '%n' "${packages[@]}" >/dev/null; then
         show_error "Unresolvable package names found. Fix the package files and re-run."
         exit 1
     fi
@@ -281,16 +279,8 @@ preflight_validate_rescue_uki() {
 }
 
 install_selected_packages() {
-    local packages=()
-    local package
-
-    for package in "${selected_packages[@]}"; do
-        [[ "$package" == snap-pac ]] && continue
-        packages+=("$package")
-    done
-
-    show_info "Installing ${#packages[@]} packages into the target; snap-pac is deferred until Snapper is configured"
-    target_chroot pacman -S --needed --noconfirm "${packages[@]}"
+    show_info "Installing ${#selected_packages[@]} packages into the target"
+    target_chroot pacman -S --needed --noconfirm "${selected_packages[@]}"
 }
 
 setup_snapper_rollback() {
@@ -308,13 +298,10 @@ setup_snapper_rollback() {
     target_chroot snapper -c root set-config \
         TIMELINE_CREATE=no \
         TIMELINE_CLEANUP=no \
-        NUMBER_CLEANUP=yes \
-        NUMBER_LIMIT=20 \
-        NUMBER_LIMIT_IMPORTANT=5 \
-        EMPTY_PRE_POST_CLEANUP=yes
-    enable_target_service snapper-cleanup.timer
+        NUMBER_CLEANUP=no \
+        EMPTY_PRE_POST_CLEANUP=no
 
-    copy_settings_file rollback /usr/local/sbin/arch-rollback 0755
+    copy_settings_file rollback /usr/local/sbin/rollback-root 0755
 
     # Install snap-pac only after Snapper's root config and sibling
     # @snapshots mount are in place, so installer pacman work is not captured.
@@ -500,31 +487,23 @@ EOF
         copy_settings_file boot /etc/cmdline.d/intel.conf
     fi
 
-    if [[ "$use_lockdown" == "yes" ]]; then
-        copy_settings_file boot /etc/cmdline.d/lockdown.conf
-    fi
+    copy_settings_file boot /etc/cmdline.d/lockdown.conf
 
-    if [[ "$encrypt_root" == "yes" ]]; then
-        case "$unlock_method" in
-            tpm2)
-                printf 'cryptroot  UUID=%s  none  tpm2-device=auto,password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
-                ;;
-            fido2)
-                printf 'cryptroot  UUID=%s  none  fido2-device=auto,password-echo=no,x-systemd.device-timeout=30,timeout=0,no-read-workqueue,no-write-workqueue\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
-                ;;
-            passphrase)
-                printf 'cryptroot  UUID=%s  none  password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
-                ;;
-        esac
-        printf 'root=/dev/mapper/cryptroot\n' >/mnt/etc/cmdline.d/root.conf
-        copy_settings_source boot/etc/mkinitcpio.conf.encrypted /etc/mkinitcpio.conf
-    else
-        printf 'root=UUID=%s\n' "$root_uuid" >/mnt/etc/cmdline.d/root.conf
-        copy_settings_source boot/etc/mkinitcpio.conf.plain /etc/mkinitcpio.conf
-    fi
+    case "$unlock_method" in
+        tpm2)
+            printf 'cryptroot  UUID=%s  none  tpm2-device=auto,password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
+            ;;
+        fido2)
+            printf 'cryptroot  UUID=%s  none  fido2-device=auto,password-echo=no,x-systemd.device-timeout=30,timeout=0,no-read-workqueue,no-write-workqueue\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
+            ;;
+        passphrase)
+            printf 'cryptroot  UUID=%s  none  password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
+            ;;
+    esac
+    printf 'root=/dev/mapper/cryptroot\n' >/mnt/etc/cmdline.d/root.conf
+    copy_settings_source boot/etc/mkinitcpio.conf.encrypted /etc/mkinitcpio.conf
 
     copy_settings_file boot /etc/mkinitcpio.d/linux.preset
-    copy_settings_file boot /etc/mkinitcpio.d/linux-lts.preset
 
     # Drop initramfs images generated by the stock presets during pacstrap;
     # nothing references them once the UKI presets take over.
@@ -533,10 +512,8 @@ EOF
     target_chroot mkinitcpio -P
 
     delete_boot_entries_by_label "arch-linux"
-    delete_boot_entries_by_label "arch-linux-lts"
     delete_boot_entries_by_label "arch-rescue"
     target_chroot efibootmgr --create --disk "$target_disk" --part 1 --label "arch-rescue" --loader "\\EFI\\Linux\\arch-rescue.efi" --unicode
-    target_chroot efibootmgr --create --disk "$target_disk" --part 1 --label "arch-linux-lts" --loader "\\EFI\\Linux\\arch-linux-lts.efi" --unicode
     target_chroot efibootmgr --create --disk "$target_disk" --part 1 --label "arch-linux" --loader "\\EFI\\Linux\\arch-linux.efi" --unicode
 
     enable_target_service tailscaled.service
@@ -571,47 +548,42 @@ EOF
     setup_snapper_rollback
     target_chroot passwd -l root >/dev/null
 
-    if [[ "$encrypt_root" == "yes" ]]; then
-        case "$unlock_method" in
-            tpm2)
-                echo "Enrolling TPM2 LUKS key with PIN. The install user's password authorizes enrollment and is removed afterward."
-                target_chroot systemd-cryptenroll "$root_part" \
-                    --wipe-slot=password \
-                    --tpm2-device=auto \
-                    --tpm2-with-pin=yes \
-                    --tpm2-pcrs=
-                show_info "Only TPM2+PIN remains enrolled for LUKS unlock. Add backup methods post-install with systemd-cryptenroll."
-                ;;
-            fido2)
-                echo "Insert your FIDO2 key, then press Enter to enroll it with a PIN."
-                read -r
-                echo "The install user's password authorizes enrollment and is removed afterward."
-                target_chroot systemd-cryptenroll "$root_part" \
-                    --wipe-slot=password \
-                    --fido2-device=auto \
-                    --fido2-with-client-pin=yes \
-                    --fido2-credential-algorithm=eddsa
-                show_info "Only FIDO2+PIN remains enrolled for LUKS unlock. Add backup methods post-install with systemd-cryptenroll."
-                ;;
-        esac
-    fi
+    case "$unlock_method" in
+        tpm2)
+            echo "Enrolling TPM2 LUKS key with PIN. The install user's password authorizes enrollment and is removed afterward."
+            target_chroot systemd-cryptenroll "$root_part" \
+                --wipe-slot=password \
+                --tpm2-device=auto \
+                --tpm2-with-pin=yes \
+                --tpm2-pcrs=
+            show_info "Only TPM2+PIN remains enrolled for LUKS unlock. Add backup methods post-install with systemd-cryptenroll."
+            ;;
+        fido2)
+            echo "Insert your FIDO2 key, then press Enter to enroll it with a PIN."
+            read -r
+            echo "The install user's password authorizes enrollment and is removed afterward."
+            target_chroot systemd-cryptenroll "$root_part" \
+                --wipe-slot=password \
+                --fido2-device=auto \
+                --fido2-with-client-pin=yes \
+                --fido2-credential-algorithm=eddsa
+            show_info "Only FIDO2+PIN remains enrolled for LUKS unlock. Add backup methods post-install with systemd-cryptenroll."
+            ;;
+    esac
 
-    if [[ "$secure_boot" == "yes" ]]; then
-        if target_chroot sbctl status | grep -q 'Setup Mode:.*Enabled'; then
-            target_chroot sbctl create-keys
-            target_chroot sbctl enroll-keys -m
-            target_chroot sbctl sign -s /efi/EFI/Linux/arch-linux.efi
-            target_chroot sbctl sign -s /efi/EFI/Linux/arch-linux-lts.efi
-            target_chroot sbctl sign -s "$RESCUE_UKI_TARGET"
-            if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
-                target_chroot sbctl sign -s /usr/lib/fwupd/efi/fwupdx64.efi
-            fi
-            target_chroot sbctl verify
-            target_chroot sbctl status || true
-        else
-            show_error "Secure Boot is not in setup mode"
-            exit 1
+    if target_chroot sbctl status | grep -q 'Setup Mode:.*Enabled'; then
+        target_chroot sbctl create-keys
+        target_chroot sbctl enroll-keys -m
+        target_chroot sbctl sign -s /efi/EFI/Linux/arch-linux.efi
+        target_chroot sbctl sign -s "$RESCUE_UKI_TARGET"
+        if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
+            target_chroot sbctl sign -s /usr/lib/fwupd/efi/fwupdx64.efi
         fi
+        target_chroot sbctl verify
+        target_chroot sbctl status || true
+    else
+        show_error "Secure Boot is not in setup mode"
+        exit 1
     fi
 
     # Deferred to the end: the chroot steps above need working DNS, which the
@@ -626,46 +598,26 @@ kblayout=us
 locale=en_US.UTF-8
 loadkeys "$kblayout" || show_warn "Could not load keymap $kblayout (no console access?); continuing"
 
-gum style --foreground 212 --bold --margin "1 0" "LUKS Encryption"
-if gum confirm "Encrypt the root partition?"; then
-    encrypt_root=yes
-else
-    encrypt_root=no
+gum style --foreground 212 --bold --margin "1 0" "LUKS Unlock"
+unlock_choices=("FIDO2 + PIN" "Passphrase only")
+if [[ -c /dev/tpmrm0 ]]; then
+    unlock_choices=("TPM2 + PIN" "${unlock_choices[@]}")
 fi
-
-if [[ "$encrypt_root" == "yes" ]]; then
-    unlock_choices=("FIDO2 + PIN" "Passphrase only")
-    if [[ -c /dev/tpmrm0 ]]; then
-        unlock_choices=("TPM2 + PIN" "${unlock_choices[@]}")
-    fi
-    unlock_method_label=$(gum choose --header "Select LUKS unlock method:" "${unlock_choices[@]}")
-    case "$unlock_method_label" in
-        "TPM2 + PIN") unlock_method=tpm2 ;;
-        "FIDO2 + PIN") unlock_method=fido2 ;;
-        "Passphrase only") unlock_method=passphrase ;;
-    esac
-else
-    unlock_method=none
-fi
+unlock_method_label=$(gum choose --header "Select mandatory LUKS unlock method:" "${unlock_choices[@]}")
+case "$unlock_method_label" in
+    "TPM2 + PIN") unlock_method=tpm2 ;;
+    "FIDO2 + PIN") unlock_method=fido2 ;;
+    "Passphrase only") unlock_method=passphrase ;;
+esac
 
 gum style --foreground 212 --bold --margin "1 0" "Secure Boot"
-if gum confirm "Enable Secure Boot?"; then
-    secure_boot=yes
-    setup_mode=$(od -An -t u1 -j4 -N1 /sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | tr -d ' ')
-    if [[ "$setup_mode" != "1" ]]; then
-        show_error "Secure Boot Setup Mode is not enabled. Clear firmware Secure Boot keys and re-run the installer."
-        exit 1
-    fi
-else
-    secure_boot=no
+setup_mode=$(od -An -t u1 -j4 -N1 /sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | tr -d ' ')
+if [[ "$setup_mode" != "1" ]]; then
+    show_error "Secure Boot Setup Mode is not enabled. Clear firmware Secure Boot keys and re-run the installer."
+    exit 1
 fi
-
-gum style --foreground 212 --bold --margin "1 0" "Kernel Lockdown"
-if gum confirm "Enable kernel lockdown (integrity mode)?"; then
-    use_lockdown=yes
-else
-    use_lockdown=no
-fi
+show_info "Secure Boot setup is mandatory and firmware Setup Mode is enabled"
+show_info "Kernel lockdown integrity mode is mandatory"
 
 gum style --foreground 212 --bold --margin "1 0" "Hardware"
 if gum confirm "Disable Bluetooth?"; then
@@ -678,13 +630,6 @@ if gum confirm "Disable Thunderbolt?"; then
     disable_thunderbolt=yes
 else
     disable_thunderbolt=no
-fi
-
-gum style --foreground 212 --bold --margin "1 0" "Optional Packages"
-if gum confirm "Install Docker packages?"; then
-    use_docker_packages=yes
-else
-    use_docker_packages=no
 fi
 
 gum style --foreground 212 --bold --margin "1 0" "Hostname"
@@ -735,12 +680,8 @@ preflight_validate_packages
 preflight_validate_rescue_uki
 
 wipe_mode=none
-if gum confirm "Securely wipe $target_disk before partitioning? This can take a long time."; then
-    wipe_mode=zero
-    if [[ "$(lsblk --nodeps --noheadings --output ROTA "$target_disk" | tr -d '[:space:]')" == "0" ]] &&
-        gum confirm "$target_disk is an SSD. Use fast TRIM-based discard instead of a full overwrite?"; then
-        wipe_mode=discard
-    fi
+if gum confirm "Securely wipe $target_disk with blkdiscard before partitioning? This is fast and intended for SSD/NVMe devices."; then
+    wipe_mode=discard
 fi
 
 gum style --foreground 212 --bold --margin "1 0" "Installation Summary"
@@ -748,15 +689,14 @@ gum style --border rounded --border-foreground 212 --padding "1 2" --margin "0 2
     "Target disk:     $target_disk" \
     "Disk layout:     GPT: 1 GiB ESP + Btrfs root remainder" \
     "Secure wipe:     $wipe_mode" \
-    "Encryption:      $encrypt_root" \
+    "Encryption:      yes" \
     "Unlock method:   $unlock_method" \
-    "Secure Boot:     $secure_boot" \
+    "Secure Boot:     yes" \
     "AppArmor:        yes" \
-    "Lockdown:        $use_lockdown" \
+    "Lockdown:        integrity" \
     "Bluetooth off:   $disable_bluetooth" \
     "Thunderbolt off: $disable_thunderbolt" \
     "Desktop:         Niri" \
-    "Docker:          $use_docker_packages" \
     "Network:         iwd + systemd-networkd" \
     "GPU packages:    $gpu_label" \
     "Hostname:        $hostname" \
@@ -773,8 +713,8 @@ if findmnt -rn /mnt >/dev/null 2>&1; then
     exit 1
 fi
 
-if [[ -e /dev/mapper/cryptroot || -e /dev/mapper/to_be_wiped ]]; then
-    show_error "An installer mapper already exists. Close cryptroot/to_be_wiped before running."
+if [[ -e /dev/mapper/cryptroot ]]; then
+    show_error "An installer mapper already exists. Close cryptroot before running."
     exit 1
 fi
 
@@ -782,15 +722,6 @@ if [[ "$wipe_mode" == "discard" ]]; then
     show_info "Discarding all blocks on $target_disk"
     wipefs --all "$target_disk"
     blkdiscard -f "$target_disk"
-    partprobe "$target_disk" || true
-    udevadm settle || true
-elif [[ "$wipe_mode" == "zero" ]]; then
-    show_info "Securely wiping $target_disk"
-    wipefs --all "$target_disk"
-    cryptsetup open --type plain -c aes-xts-plain64 -d /dev/urandom "$target_disk" to_be_wiped
-    wipe_size=$(blockdev --getsize64 /dev/mapper/to_be_wiped)
-    dd if=/dev/zero of=/dev/mapper/to_be_wiped bs=16M count="$wipe_size" iflag=count_bytes status=progress conv=fsync
-    cryptsetup close to_be_wiped
     partprobe "$target_disk" || true
     udevadm settle || true
 fi
@@ -817,13 +748,9 @@ if cryptsetup isLuks "$root_part"; then
 fi
 wipefs --all "$root_part" 2>/dev/null || true
 
-if [[ "$encrypt_root" == "yes" ]]; then
-    printf '%s' "$userpass" | cryptsetup -q -c aes-xts-plain64 -s 512 -h sha512 luksFormat "$root_part" -d -
-    printf '%s' "$userpass" | cryptsetup open "$root_part" cryptroot -d -
-    root_device=/dev/mapper/cryptroot
-else
-    root_device="$root_part"
-fi
+printf '%s' "$userpass" | cryptsetup -q -c aes-xts-plain64 -s 512 -h sha512 luksFormat "$root_part" -d -
+printf '%s' "$userpass" | cryptsetup open "$root_part" cryptroot -d -
+root_device=/dev/mapper/cryptroot
 
 mkfs.btrfs -f -L linux "$root_device"
 
@@ -849,7 +776,7 @@ mount -o fmask=0137,dmask=0027 "$efi_part" /mnt/efi
 detect_microcode
 show_info "Installing base system with pacstrap"
 pacstrap -K /mnt \
-    base base-devel linux linux-headers linux-lts linux-lts-headers "$microcode" linux-firmware
+    base base-devel linux linux-headers "$microcode" linux-firmware
 
 show_info "Generating fstab"
 genfstab -U /mnt >/mnt/etc/fstab
@@ -863,17 +790,10 @@ configure_target
 unset userpass userpass2
 
 echo ""
-if [[ "$secure_boot" == "yes" ]]; then
-    gum style \
-        --foreground 82 --border-foreground 82 --border double \
-        --align center --width 74 --margin "1 2" --padding "1 2" \
-        "Installation Complete" \
-        "" \
-        "Reboot into firmware and enable Secure Boot:" \
-        "systemctl reboot --firmware-setup"
-else
-    gum style \
-        --foreground 82 --border-foreground 82 --border double \
-        --align center --width 74 --margin "1 2" --padding "1 2" \
-        "Installation Complete"
-fi
+gum style \
+    --foreground 82 --border-foreground 82 --border double \
+    --align center --width 74 --margin "1 2" --padding "1 2" \
+    "Installation Complete" \
+    "" \
+    "Reboot into firmware and enable Secure Boot:" \
+    "systemctl reboot --firmware-setup"

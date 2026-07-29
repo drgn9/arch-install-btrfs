@@ -2,10 +2,10 @@ Arch rescue UKI.
 
 Run:
 
-    rescue-arch
+    rescue-root
 
 For Wi-Fi setup, run:
 
     impala
 
-For manual repair, rescue-arch can mount the installed system at /mnt.
+For manual repair, rescue-root can mount the installed system at /mnt.

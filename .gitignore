@@ -26,4 +26,4 @@ rescue-uki/*.manifest
 rescue-uki/*.changelog
 rescue-uki/*.sha256
 rescue-uki/*.bmap
-rescue-uki/mkosi.extra/usr/local/bin/rescue-arch
+rescue-uki/mkosi.extra/usr/local/bin/rescue-root

@@ -65,14 +65,14 @@ install -D -m 0644 "$RESCUE_UKI_ARTIFACT" \
 # Launcher commands and login message
 install -D -m 0755 "$SCRIPT_DIR/airootfs/usr/local/bin/install-arch" \
     "$PROFILE_DIR/airootfs/usr/local/bin/install-arch"
-install -D -m 0755 "$SCRIPT_DIR/airootfs/usr/local/bin/rescue-arch" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/rescue-arch"
+install -D -m 0755 "$SCRIPT_DIR/airootfs/usr/local/bin/rescue-root" \
+    "$PROFILE_DIR/airootfs/usr/local/bin/rescue-root"
 install -D -m 0644 "$SCRIPT_DIR/airootfs/etc/motd" \
     "$PROFILE_DIR/airootfs/etc/motd"
 
 # mkarchiso does not preserve file modes from the profile overlay; executable
 # bits must be declared in profiledef.sh's file_permissions map.
-sed -i '/^file_permissions=(/a\  ["/usr/local/bin/install-arch"]="0:0:755"\n  ["/usr/local/bin/rescue-arch"]="0:0:755"' \
+sed -i '/^file_permissions=(/a\  ["/usr/local/bin/install-arch"]="0:0:755"\n  ["/usr/local/bin/rescue-root"]="0:0:755"' \
     "$PROFILE_DIR/profiledef.sh"
 
 sed -i 's/^iso_name=.*/iso_name="arch-new-install"/' "$PROFILE_DIR/profiledef.sh"

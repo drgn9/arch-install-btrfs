@@ -154,7 +154,6 @@ list_snapshots() {
 sign_and_verify_ukis() {
     if arch-chroot /mnt bash -lc 'command -v sbctl >/dev/null 2>&1 && [[ -d /var/lib/sbctl/keys ]]'; then
         arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-linux.efi
-        arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-linux-lts.efi
         if [[ -f /mnt/efi/EFI/Linux/arch-rescue.efi ]]; then
             arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-rescue.efi
         fi

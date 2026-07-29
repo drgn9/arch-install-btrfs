@@ -19,4 +19,4 @@ mkosi.credentials/
 *.changelog
 *.sha256
 *.bmap
-mkosi.extra/usr/local/bin/rescue-arch
+mkosi.extra/usr/local/bin/rescue-root

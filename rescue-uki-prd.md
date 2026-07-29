@@ -26,12 +26,12 @@ Rescue UKI responsibilities:
 
 - Boot from the already-installed machine's ESP.
 - Boot under already-established Secure Boot trust.
-- Provide rescue and rollback operations currently available from the custom ISO's `rescue-arch` command.
+- Provide rescue and rollback operations currently available from the custom ISO's `rescue-root` command.
 - Avoid dependency on Ventoy or a USB stick for ordinary rescue.
 
 ## Version 1 Scope
 
-V1 creates and installs a rescue UKI that can do the same rescue and rollback operations that the ISO currently provides through `rescue-arch`.
+V1 creates and installs a rescue UKI that can do the same rescue and rollback operations that the ISO currently provides through `rescue-root`.
 
 V1 must support:
 
@@ -39,7 +39,7 @@ V1 must support:
 - Placing that `.efi` file on the ESP at a stable path.
 - Signing the rescue UKI with `sbctl`.
 - Creating a direct EFI boot entry for the rescue UKI.
-- Running `rescue-arch` from the rescue environment.
+- Running `rescue-root` from the rescue environment.
 - Unlocking the installed system's LUKS root if needed.
 - Mounting the installed root subvolume and ESP for chroot repair.
 - Replacing `@` from an existing Snapper snapshot.
@@ -70,7 +70,6 @@ Normal installed boot targets:
 
 ```text
 /efi/EFI/Linux/arch-linux.efi
-/efi/EFI/Linux/arch-linux-lts.efi
 ```
 
 New rescue boot target:
@@ -83,7 +82,6 @@ EFI boot entries:
 
 ```text
 arch-linux
-arch-linux-lts
 arch-rescue
 ```
 
@@ -145,7 +143,7 @@ That path matches the custom ISO convention.
 The rescue image should expose a simple launcher:
 
 ```text
-/usr/local/bin/rescue-arch
+/usr/local/bin/rescue-root
 ```
 
 The launcher should run the repository copy's rescue script, or the rescue script itself should be installed directly into the image.
@@ -187,7 +185,7 @@ Package notes:
 - `cryptsetup` is required for LUKS unlock.
 - `sbctl` is required to sign/verify installed-system UKIs.
 - `snapper` is required to inspect snapshots if needed.
-- `gum` is required by `rescue-arch` menus.
+- `gum` is required by `rescue-root` menus.
 - `impala` and `iwd` provide Wi-Fi setup if networking is needed.
 - `rsync` is useful for rescue copies and backups.
 
@@ -257,16 +255,16 @@ Autologin is out of scope for V1 unless explicitly added later.
 V1 must reuse the existing rescue script:
 
 ```text
-iso/airootfs/usr/local/bin/rescue-arch
+iso/airootfs/usr/local/bin/rescue-root
 ```
 
 V1 must not create a second rescue implementation or duplicate this logic in a new script. The rescue UKI should package the existing script and expose it as the primary command in the rescue environment:
 
 ```bash
-rescue-arch
+rescue-root
 ```
 
-The existing `rescue-arch` behavior is the V1 functional contract. It currently provides two actions:
+The existing `rescue-root` behavior is the V1 functional contract. It currently provides two actions:
 
 ```text
 Mount installation and enter a repair shell
@@ -315,7 +313,7 @@ This existing action currently:
 12. Unmount and close LUKS if opened.
 13. Offer to reboot.
 
-V1 packaging must preserve the safety fixes already made to `rescue-arch`:
+V1 packaging must preserve the safety fixes already made to `rescue-root`:
 
 - cleanup on failed exits
 - temporary replacement root before moving current `@`
@@ -378,7 +376,7 @@ efibootmgr --create \
 
 The first implementation may make this a manual documented command instead of automating it.
 
-If automated, it should remove existing `arch-rescue` entries first, using the same pattern as the current installer uses for `arch-linux` and `arch-linux-lts`.
+If automated, it should remove existing `arch-rescue` entries first, using the same pattern as the current installer uses for `arch-linux`.
 
 ## Output And Gitignore
 
@@ -411,9 +409,9 @@ V1 is complete when:
 - `sbctl verify /efi/EFI/Linux/arch-rescue.efi` succeeds.
 - An `arch-rescue` EFI boot entry can boot the rescue environment.
 - The rescue environment allows root login.
-- `rescue-arch` is available in the rescue environment.
-- `rescue-arch` can mount the installed system for manual repair.
-- `rescue-arch` can replace `@` from a Snapper snapshot.
+- `rescue-root` is available in the rescue environment.
+- `rescue-root` can mount the installed system for manual repair.
+- `rescue-root` can replace `@` from a Snapper snapshot.
 - After snapshot replacement, installed-system UKIs are rebuilt and signed.
 - The current USB ISO installer behavior is unchanged.
 
@@ -428,7 +426,7 @@ Test cases:
 3. Sign rescue UKI.
 4. Boot rescue UKI from firmware entry.
 5. Confirm root login works.
-6. Confirm `rescue-arch` exists.
+6. Confirm `rescue-root` exists.
 7. Confirm LUKS unlock works for the installed system.
 8. Confirm manual repair mount works.
 9. Confirm `arch-chroot /mnt` works.

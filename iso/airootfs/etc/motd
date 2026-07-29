@@ -7,7 +7,7 @@ To begin the guided installation, type:
 
 To repair an existing installation or replace @ from a Snapper snapshot, type:
 
-    rescue-arch
+    rescue-root
 
 The installer checks for internet access first and opens impala
 for Wi-Fi setup if needed.

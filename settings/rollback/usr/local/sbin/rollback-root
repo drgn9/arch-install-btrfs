@@ -23,7 +23,7 @@ confirm() {
 }
 
 ensure_ready() {
-    [[ ${EUID:-0} -eq 0 ]] || die 'arch-rollback must be run as root.'
+    [[ ${EUID:-0} -eq 0 ]] || die 'rollback-root must be run as root.'
     [[ "$(findmnt -no FSTYPE /)" == btrfs ]] || die '/ is not mounted as Btrfs.'
     findmnt -rn /.snapshots >/dev/null 2>&1 || die '/.snapshots is not mounted.'
     pacman_running && die 'pacman, pacstrap, or yay is currently running.'
@@ -76,7 +76,6 @@ show_change_summary() {
 sign_and_verify_ukis() {
     if command -v sbctl >/dev/null 2>&1 && [[ -d /var/lib/sbctl/keys ]]; then
         sbctl sign -s /efi/EFI/Linux/arch-linux.efi
-        sbctl sign -s /efi/EFI/Linux/arch-linux-lts.efi
         if [[ -f /efi/EFI/Linux/arch-rescue.efi ]]; then
             sbctl sign -s /efi/EFI/Linux/arch-rescue.efi
         fi
@@ -96,7 +95,7 @@ elif (( $# == 2 )); then
     selected_pre=$1
     selected_post=$2
 else
-    die 'Usage: arch-rollback [PRE POST]'
+    die 'Usage: rollback-root [PRE POST]'
 fi
 
 status_file=$(mktemp)

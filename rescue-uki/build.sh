@@ -7,8 +7,8 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 ARTIFACT_DIR="$REPO_DIR/artifacts"
 ARTIFACT="$ARTIFACT_DIR/arch-rescue.efi"
 ROOTPW_FILE="$SCRIPT_DIR/mkosi.rootpw"
-RESCUE_SOURCE="$REPO_DIR/iso/airootfs/usr/local/bin/rescue-arch"
-RESCUE_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/bin/rescue-arch"
+RESCUE_SOURCE="$REPO_DIR/iso/airootfs/usr/local/bin/rescue-root"
+RESCUE_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/bin/rescue-root"
 
 cleanup() {
     rm -f "$ROOTPW_FILE"
