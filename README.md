@@ -53,6 +53,7 @@ Secure Boot model:
 
 - Firmware must already be in Secure Boot Setup Mode before the installer runs.
 - The installer creates `sbctl` keys, enrolls them, signs `arch-linux.efi`, signs `arch-rescue.efi`, and verifies signatures.
+- `fwupd` is configured for custom Secure Boot keys with `/usr/lib/fwupd/efi/fwupdx64.efi.signed` and `DisableShimForSecureBoot=true`.
 - Secure Boot private keys remain on the installed system under `/var/lib/sbctl`, which is mounted from the `@sbctl` Btrfs subvolume.
 - The rescue UKI is not signed at ISO build time. It is signed during installation with the target system's keys.
 
@@ -212,7 +213,7 @@ Settings customization:
 ```text
 settings/access/       sudo and polkit policy
 settings/boot/         kernel command line, mkinitcpio config, UKI preset
-settings/hardware/     Bluetooth, Thunderbolt, and Wi-Fi configuration
+settings/hardware/     Bluetooth, Thunderbolt, Wi-Fi, and fwupd configuration
 settings/network/      networkd, resolved, iwd, and network sysctls
 settings/power/        sleep, watchdog, and zram policy
 settings/rollback/     rollback-root helper
@@ -466,6 +467,7 @@ Boot-related installed paths:
 /etc/cmdline.d/root.conf           generated during install
 /etc/mkinitcpio.conf               installed from encrypted variant
 /etc/mkinitcpio.d/linux.preset
+/etc/fwupd/fwupd.conf              configured for custom Secure Boot keys
 /efi/EFI/Linux/arch-linux.efi
 /efi/EFI/Linux/arch-rescue.efi
 ```

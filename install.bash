@@ -457,6 +457,8 @@ EOF
         copy_settings_file hardware /etc/modprobe.d/disable-thunderbolt.conf
     fi
 
+    copy_settings_file hardware /etc/fwupd/fwupd.conf
+
     copy_settings_file power /etc/systemd/zram-generator.conf
 
     copy_settings_file power /etc/systemd/logind.conf.d/no-sleep.conf
@@ -577,7 +579,7 @@ EOF
         target_chroot sbctl sign -s /efi/EFI/Linux/arch-linux.efi
         target_chroot sbctl sign -s "$RESCUE_UKI_TARGET"
         if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
-            target_chroot sbctl sign -s /usr/lib/fwupd/efi/fwupdx64.efi
+            target_chroot sbctl sign -s -o /usr/lib/fwupd/efi/fwupdx64.efi.signed /usr/lib/fwupd/efi/fwupdx64.efi
         fi
         target_chroot sbctl verify
         target_chroot sbctl status || true
