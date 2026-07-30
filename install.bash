@@ -381,6 +381,35 @@ delete_boot_entries_by_label() {
     done < <(target_chroot efibootmgr --unicode 2>/dev/null | awk -v label="$label" '$1 ~ /^Boot[0-9A-Fa-f]{4}\*?$/ && $2 == label { sub(/^Boot/, "", $1); sub(/\*.*/, "", $1); print $1 }')
 }
 
+manage_efi_boot_entries() {
+    local entries entry boot_num
+
+    show_info "Managing EFI boot entries"
+    efibootmgr --unicode || true
+
+    while true; do
+        entries=$(efibootmgr --unicode 2>/dev/null | awk '$1 ~ /^Boot[0-9A-Fa-f]{4}\*?$/ { print }' || true)
+
+        if [[ -z "$entries" ]]; then
+            show_info "No EFI boot entries found"
+            break
+        fi
+
+        entry=$(printf 'Skip\n%s\n' "$entries" | gum choose --header "Select EFI boot entry to delete, or Skip:")
+
+        if [[ "$entry" == "Skip" ]]; then
+            break
+        fi
+
+        boot_num=$(awk '{ token = $1; if (token ~ /^Boot[0-9A-Fa-f]{4}\*?$/) { sub(/^Boot/, "", token); sub(/\*$/, "", token); print token } }' <<<"$entry")
+
+        if [[ -n "$boot_num" ]] && gum confirm "Delete EFI boot entry Boot$boot_num?"; then
+            efibootmgr --bootnum "$boot_num" --delete-bootnum --unicode
+            show_info "Deleted EFI boot entry Boot$boot_num"
+        fi
+    done
+}
+
 configure_target() {
     printf '%s\n' "$hostname" >/mnt/etc/hostname
 
@@ -708,6 +737,10 @@ gum style --border rounded --border-foreground 212 --padding "1 2" --margin "0 2
 if ! gum confirm "Proceed? This will destroy all data on $target_disk."; then
     show_info "Installation cancelled"
     exit 0
+fi
+
+if gum confirm "Review/delete existing EFI firmware boot entries before install?"; then
+    manage_efi_boot_entries
 fi
 
 if findmnt -rn /mnt >/dev/null 2>&1; then
