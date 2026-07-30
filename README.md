@@ -144,7 +144,7 @@ Disk layout:
 
 ```text
 Partition  Size       Type          Filesystem          Mount
-1          1 GiB      EFI System    FAT32               /efi
+1          2 GiB      EFI System    FAT32               /efi
 2          remainder  Linux root    Btrfs or LUKS+Btrfs /
 ```
 

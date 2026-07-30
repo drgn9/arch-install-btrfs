@@ -2,5 +2,6 @@ git
 gum
 impala
 btrfs-progs
+iptables
 snapper
 rsync
