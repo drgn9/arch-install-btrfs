@@ -14,6 +14,7 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 OUT_DIR="$SCRIPT_DIR/out"
 RELENG_DIR=/usr/share/archiso/configs/releng
 RESCUE_UKI_ARTIFACT="$REPO_DIR/artifacts/arch-rescue.efi"
+RESCUE_UKI_DIR="$REPO_DIR/rescue-uki"
 
 if [[ ${EUID:-0} -ne 0 ]]; then
     echo "ERROR: This script must be run as root (mkarchiso requires it)." >&2
@@ -29,6 +30,41 @@ if [[ ! -d "$RELENG_DIR" ]]; then
     echo "ERROR: $RELENG_DIR not found. Is the archiso package installed correctly?" >&2
     exit 1
 fi
+
+clean_intermediate_outputs() {
+    rm -rf \
+        "$REPO_DIR/artifacts" \
+        "$RESCUE_UKI_DIR/mkosi.output" \
+        "$RESCUE_UKI_DIR/mkosi.cache" \
+        "$RESCUE_UKI_DIR/mkosi.builddir" \
+        "$RESCUE_UKI_DIR/mkosi.workspace" \
+        "$RESCUE_UKI_DIR/.mkosi-private" \
+        "$RESCUE_UKI_DIR/mkosi.credentials"
+
+    rm -f \
+        "$RESCUE_UKI_DIR/mkosi.rootpw" \
+        "$RESCUE_UKI_DIR/mkosi.passphrase" \
+        "$RESCUE_UKI_DIR/mkosi.extra/usr/local/bin/rescue-root"
+
+    shopt -s nullglob
+    rm -f \
+        "$RESCUE_UKI_DIR"/*.efi \
+        "$RESCUE_UKI_DIR"/*.efi.* \
+        "$RESCUE_UKI_DIR"/*.raw \
+        "$RESCUE_UKI_DIR"/*.raw.* \
+        "$RESCUE_UKI_DIR"/*.tar \
+        "$RESCUE_UKI_DIR"/*.tar.* \
+        "$RESCUE_UKI_DIR"/*.manifest \
+        "$RESCUE_UKI_DIR"/*.changelog \
+        "$RESCUE_UKI_DIR"/*.sha256 \
+        "$RESCUE_UKI_DIR"/*.bmap
+    shopt -u nullglob
+}
+
+clean_previous_iso_outputs() {
+    rm -rf "$OUT_DIR"
+    install -d -m 0755 "$OUT_DIR"
+}
 
 echo "Building rescue UKI artifact..."
 "$REPO_DIR/rescue-uki/build.sh"
@@ -53,7 +89,7 @@ cp -r "$RELENG_DIR" "$PROFILE_DIR"
 cat "$SCRIPT_DIR/packages.x86_64" >>"$PROFILE_DIR/packages.x86_64"
 
 # Bake the current working tree of this repo into the live image. The filter
-# honors .gitignore so local release credentials are not embedded.
+# honors .gitignore so generated build outputs are not embedded.
 mkdir -p "$PROFILE_DIR/airootfs/root/arch-new-install"
 rsync -a --delete --filter=':- .gitignore' --exclude '.git' \
     "$REPO_DIR/" "$PROFILE_DIR/airootfs/root/arch-new-install/"
@@ -75,11 +111,23 @@ install -D -m 0644 "$SCRIPT_DIR/airootfs/etc/motd" \
 sed -i '/^file_permissions=(/a\  ["/usr/local/bin/install-arch"]="0:0:755"\n  ["/usr/local/bin/rescue-root"]="0:0:755"' \
     "$PROFILE_DIR/profiledef.sh"
 
-sed -i 's/^iso_name=.*/iso_name="arch-new-install"/' "$PROFILE_DIR/profiledef.sh"
+sed -i 's/^iso_name=.*/iso_name="arch-btrfs"/' "$PROFILE_DIR/profiledef.sh"
 
 echo "Building ISO (this takes a few minutes and downloads packages)..."
+clean_previous_iso_outputs
 mkarchiso -v -w "$WORK_DIR/build" -o "$OUT_DIR" "$PROFILE_DIR"
+
+shopt -s nullglob
+iso_outputs=("$OUT_DIR"/arch-btrfs-*.iso)
+shopt -u nullglob
+if (( ${#iso_outputs[@]} == 0 )); then
+    echo "ERROR: ISO build finished but no arch-btrfs ISO was found in $OUT_DIR" >&2
+    exit 1
+fi
+final_iso=$(printf '%s\n' "${iso_outputs[@]}" | sort | tail -n 1)
+
+clean_intermediate_outputs
 
 echo ""
 echo "Done. ISO written to:"
-printf '%s\n' "$OUT_DIR"/arch-new-install-*.iso | sort | tail -n 1
+printf '%s\n' "$final_iso"

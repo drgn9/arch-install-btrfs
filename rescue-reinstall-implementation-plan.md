@@ -79,7 +79,7 @@ V2 needs more than the current `rescue-root` script. It needs package lists, sta
 - [ ] Copy `packages/` into the payload.
 - [ ] Copy `settings/` into the payload.
 - [ ] Copy `installer-common.bash` into the payload after it exists.
-- [ ] Copy only files required for rescue reinstall; do not embed `.git`, ISO outputs, mkosi outputs, or release credentials.
+- [ ] Copy only files required for rescue reinstall; do not embed `.git`, ISO outputs, or mkosi outputs.
 - [ ] Keep the existing temporary copy of `rescue-root` as `/usr/local/bin/rescue-root`.
 
 ## Phase 3: Shared Installer Code
@@ -265,11 +265,11 @@ Split target configuration so reinstall can reuse normal installer behavior with
 Run after each significant phase:
 
 ```bash
-bash -n install.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/release.sh iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch settings/rollback/usr/local/sbin/rollback-root
+bash -n install.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch settings/rollback/usr/local/sbin/rollback-root
 ```
 
 ```bash
-shellcheck install.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/release.sh iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch settings/rollback/usr/local/sbin/rollback-root
+shellcheck install.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch settings/rollback/usr/local/sbin/rollback-root
 ```
 
 ```bash

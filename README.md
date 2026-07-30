@@ -79,12 +79,13 @@ What the build does:
 8. Builds the custom ISO from the Arch `releng` archiso profile.
 9. Copies the current repository into the ISO at `/root/arch-new-install`.
 10. Explicitly embeds `artifacts/arch-rescue.efi` into the ISO.
+11. Removes intermediate rescue UKI and mkosi outputs after the ISO is built.
 
 Build outputs:
 
 ```text
-artifacts/arch-rescue.efi         generated rescue UKI, gitignored
-iso/out/arch-new-install-*.iso    generated installer ISO, gitignored
+artifacts/arch-rescue.efi         generated rescue UKI intermediate, removed after successful ISO build
+iso/out/arch-btrfs-*.iso          final generated installer ISO, gitignored
 ```
 
 The ISO contains these launcher commands:
@@ -448,7 +449,7 @@ Important paths:
 install.bash                                      main installer
 iso/build.sh                                      custom ISO build script
 iso/out/                                          generated ISO output, gitignored
-artifacts/arch-rescue.efi                         generated rescue UKI, gitignored
+artifacts/arch-rescue.efi                         generated rescue UKI intermediate, removed after successful ISO build
 iso/airootfs/usr/local/bin/install-arch           live ISO installer launcher
 iso/airootfs/usr/local/bin/rescue-root            live ISO rescue launcher
 settings/rollback/usr/local/sbin/rollback-root    installed rollback helper
@@ -472,12 +473,4 @@ Boot-related installed paths:
 /efi/EFI/Linux/arch-rescue.efi
 ```
 
-Publishing releases:
-
-```bash
-cp iso/release.conf.example iso/release.conf
-chmod 600 iso/release.conf
-./iso/release.sh
-```
-
-`iso/release.conf` is gitignored because it may contain release tokens. `iso/release.sh` publishes the newest ISO from `iso/out/` and its generated `sha256sums.txt` to configured GitHub, Forgejo, or Cloudflare R2 targets.
+`iso/build.sh` clears old ISO outputs before each build, then removes rescue UKI and mkosi intermediate outputs after a successful build. The new final ISO remains under `iso/out/`.

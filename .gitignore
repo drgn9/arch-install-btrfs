@@ -1,6 +1,5 @@
-# Archiso and release output
+# Archiso output
 iso/out/
-iso/release.conf
 
 # Generated installer artifacts
 artifacts/
