@@ -1,6 +1,6 @@
 # Rescue Reinstall Implementation Plan
 
-This plan tracks the V2 rescue reinstall feature described in `rescue-roadmap.md`.
+This plan tracks the future V2 rescue reinstall feature.
 
 `README.md` remains the source of truth for current behavior. This file is a checklist for future implementation work.
 
@@ -25,6 +25,7 @@ The action runs from `arch-rescue`, unlocks the existing installed LUKS root, ke
 - Do not support arbitrary non-installer Arch layouts.
 - Do not create a second full installer implementation.
 - Do not add backup/journal machinery; the user is responsible for backups.
+- Keep the installed system policy aligned with the normal installer: mandatory LUKS root, mandatory Secure Boot, mandatory `lockdown=integrity`, direct UKIs, and no bootloader.
 
 ## Fixed Preserve Set
 

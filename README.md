@@ -65,6 +65,18 @@ Build on an Arch Linux machine from the repository root:
 sudo ./iso/build.sh
 ```
 
+Faster builds:
+
+- The build uses the build machine's pacman cache, normally `/var/cache/pacman/pkg/`.
+- Update the build machine before building for fresher package databases, fewer mirror/version mismatches, and better cache reuse:
+
+```bash
+sudo pacman -Syu
+sudo ./iso/build.sh
+```
+
+- Do not clear the pacman cache before building unless you intentionally want a cold rebuild. Clearing the cache forces packages to download again and makes the build slower.
+
 The build script does all required build work. There is no separate required rescue UKI build command.
 
 What the build does:
