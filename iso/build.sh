@@ -128,6 +128,12 @@ final_iso=$(printf '%s\n' "${iso_outputs[@]}" | sort | tail -n 1)
 
 clean_intermediate_outputs
 
+# The build runs as root; give the ISO and its directory back to the
+# invoking user so it can be moved, deleted, or flashed without sudo.
+if [[ -n "${SUDO_USER:-}" ]]; then
+    chown "$SUDO_UID:$SUDO_GID" "$OUT_DIR" "$final_iso"
+fi
+
 echo ""
 echo "Done. ISO written to:"
 printf '%s\n' "$final_iso"

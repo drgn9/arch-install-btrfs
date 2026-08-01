@@ -725,7 +725,7 @@ fi
 gum style --foreground 212 --bold --margin "1 0" "Installation Summary"
 gum style --border rounded --border-foreground 212 --padding "1 2" --margin "0 2" \
     "Target disk:     $target_disk" \
-    "Disk layout:     GPT: 3 GiB ESP + Btrfs root remainder" \
+    "Disk layout:     GPT: 2 GiB ESP + Btrfs root remainder" \
     "Secure wipe:     $wipe_mode" \
     "Encryption:      yes" \
     "Unlock method:   $unlock_method" \
@@ -771,7 +771,7 @@ fi
 show_info "Creating declarative full-disk GPT layout with sfdisk"
 sfdisk --wipe always --wipe-partitions always "$target_disk" <<'EOF'
 label: gpt
-size=3GiB, type=uefi, name=ESP
+size=2GiB, type=uefi, name=ESP
 type=linux, name=ROOT
 EOF
 partprobe "$target_disk" || true
