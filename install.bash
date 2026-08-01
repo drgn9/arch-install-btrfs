@@ -423,7 +423,7 @@ EOF
     printf 'LANG=%s\n' "$locale" >/mnt/etc/locale.conf
     printf 'KEYMAP=%s\n' "$kblayout" >/mnt/etc/vconsole.conf
     ln -sf "/usr/share/zoneinfo/$timezone" /mnt/etc/localtime
-    target_chroot hwclock --systohc
+    target_chroot hwclock --systohc || show_warn "hwclock --systohc failed; set the hardware clock manually after install"
     target_chroot locale-gen >/dev/null
 
     install -d -m 0755 /mnt/etc/systemd/network
@@ -453,6 +453,7 @@ EOF
     enable_target_service systemd-networkd.service
     enable_target_service systemd-resolved.service
     enable_target_service systemd-timesyncd.service
+    enable_target_service systemd-networkd-wait-online.service
 
     copy_settings_file network /etc/sysctl.d/99-firewall-settings.conf
     copy_settings_file power /etc/sysctl.d/99-watchdog-settings.conf
@@ -563,14 +564,16 @@ EOF
 
     if ! target_chroot bash -lc 'command -v yay >/dev/null 2>&1'; then
         # shellcheck disable=SC2016
-        target_chroot runuser -u "$username" -- bash -lc '
+        if ! target_chroot runuser -u "$username" -- bash -lc '
             set -euo pipefail
             tmpdir=$(mktemp -d)
             trap "rm -rf \"$tmpdir\"" EXIT
-            git clone https://aur.archlinux.org/yay-bin.git "$tmpdir/yay-bin" >/dev/null
+            git clone https://aur.archlinux.org/yay-bin.git "$tmpdir/yay-bin"
             cd "$tmpdir/yay-bin"
-            makepkg -si --noconfirm >/dev/null
-        '
+            makepkg -si --noconfirm
+        ' 2>&1 | tee /mnt/var/log/yay-install.log; then
+            show_warn "yay build failed; install it manually after first boot. Log: /var/log/yay-install.log"
+        fi
     fi
 
     rm -f /mnt/etc/sudoers.d/99-installer-aur-nopasswd
@@ -702,8 +705,12 @@ if [[ -z "$devices" ]]; then
     show_error "No target disks found"
     exit 1
 fi
-target_disk=$(printf '%s\n' "$devices" | gum choose --header "Select disk to fully erase and install Arch onto:" | awk '{print $1}')
-validate_disk_target "$target_disk"
+while true; do
+    target_disk=$(printf '%s\n' "$devices" | gum choose --header "Select disk to fully erase and install Arch onto:" | awk '{print $1}')
+    if validate_disk_target "$target_disk"; then
+        break
+    fi
+done
 
 detect_gpu_package_files
 collect_selected_packages
@@ -718,7 +725,7 @@ fi
 gum style --foreground 212 --bold --margin "1 0" "Installation Summary"
 gum style --border rounded --border-foreground 212 --padding "1 2" --margin "0 2" \
     "Target disk:     $target_disk" \
-    "Disk layout:     GPT: 2 GiB ESP + Btrfs root remainder" \
+    "Disk layout:     GPT: 3 GiB ESP + Btrfs root remainder" \
     "Secure wipe:     $wipe_mode" \
     "Encryption:      yes" \
     "Unlock method:   $unlock_method" \
@@ -764,7 +771,7 @@ fi
 show_info "Creating declarative full-disk GPT layout with sfdisk"
 sfdisk --wipe always --wipe-partitions always "$target_disk" <<'EOF'
 label: gpt
-size=2GiB, type=uefi, name=ESP
+size=3GiB, type=uefi, name=ESP
 type=linux, name=ROOT
 EOF
 partprobe "$target_disk" || true
@@ -823,6 +830,13 @@ install_selected_packages
 show_info "Configuring target system"
 configure_target
 unset userpass userpass2
+
+if ! umount -R /mnt; then
+    show_error "Failed to unmount /mnt cleanly. Close open files on it, then run: umount -R /mnt"
+fi
+if ! cryptsetup close cryptroot; then
+    show_error "Failed to close cryptroot. Close it manually before rebooting: cryptsetup close cryptroot"
+fi
 
 echo ""
 gum style \

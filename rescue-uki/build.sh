@@ -10,6 +10,12 @@ ROOTPW_FILE="$SCRIPT_DIR/mkosi.rootpw"
 RESCUE_SOURCE="$REPO_DIR/iso/airootfs/usr/local/bin/rescue-root"
 RESCUE_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/bin/rescue-root"
 
+# The rescue image is built with a pinned mkosi version so builds do not
+# silently change behavior when the build machine upgrades its mkosi package.
+# Bump MKOSI_VERSION deliberately after reading the mkosi release notes.
+MKOSI_VERSION=26
+MKOSI_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/arch-new-install/mkosi/v$MKOSI_VERSION"
+
 cleanup() {
     rm -f "$ROOTPW_FILE"
     rm -f "$RESCUE_OVERLAY"
@@ -27,13 +33,13 @@ if [[ ! -f "$RESCUE_SOURCE" ]]; then
 fi
 
 deps_needed=()
-for dep in mkosi rsync openssl git; do
+for dep in python3 rsync openssl git; do
     command -v "$dep" &>/dev/null || deps_needed+=("$dep")
 done
 
 if [[ ${#deps_needed[@]} -gt 0 ]]; then
     echo "Installing rescue UKI build dependencies: ${deps_needed[*]}"
-    pacman -S --needed --noconfirm mkosi rsync openssl git
+    pacman -S --needed --noconfirm python rsync openssl git
 fi
 
 read_secret() {
@@ -75,8 +81,13 @@ install -D -m 0755 "$RESCUE_SOURCE" "$RESCUE_OVERLAY"
 rm -rf "$SCRIPT_DIR/mkosi.output"
 rm -f "$ARTIFACT"
 
+if [[ ! -d "$MKOSI_HOME" ]]; then
+    echo "Downloading mkosi v$MKOSI_VERSION (one-time download; cached for future builds)..."
+    git clone --depth 1 --branch "v$MKOSI_VERSION" https://github.com/systemd/mkosi "$MKOSI_HOME"
+fi
+
 echo "Building rescue UKI..."
-mkosi -C "$SCRIPT_DIR" build
+PYTHONPATH="$MKOSI_HOME" python3 -m mkosi -C "$SCRIPT_DIR" build
 
 shopt -s nullglob
 uki_outputs=("$SCRIPT_DIR"/mkosi.output/*.efi)

@@ -101,6 +101,12 @@ mount_installed_system() {
     else
         echo 'WARNING: /mnt/efi does not exist on the target; skipping the ESP mount.' >&2
     fi
+
+    # @sbctl holds the Secure Boot keys; without it no UKI can be signed.
+    install -d -m 0755 /mnt/var/lib/sbctl
+    if ! mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@sbctl" "$root_device" /mnt/var/lib/sbctl; then
+        echo 'WARNING: could not mount @sbctl at /mnt/var/lib/sbctl; sbctl signing will be unavailable.' >&2
+    fi
 }
 
 mount_for_repair() {
@@ -114,6 +120,7 @@ mount_for_repair() {
 
 Your root subvolume is mounted at /mnt.
 The ESP is mounted at /mnt/efi when present.
+The @sbctl subvolume is mounted at /mnt/var/lib/sbctl when present.
 
 Enter the installed system:
 
@@ -172,6 +179,11 @@ replace_root_from_snapshot() {
 
     mount -o "$BTRFS_MOUNT_OPTIONS,subvolid=5" "$root_device" /mnt
     top_mounted=yes
+
+    # Refuse to continue before any subvolume mutation if the Secure Boot
+    # keys are missing; the rebuilt arch-linux.efi must be signed afterwards
+    # or the system will not boot.
+    [[ -d /mnt/@sbctl/keys ]] || die 'sbctl keys not found at @sbctl/keys; refusing to replace @ because the rebuilt UKI could not be signed.'
 
     snapshots=$(list_snapshots)
     [[ -n "$snapshots" ]] || die 'No Snapper snapshots found.'

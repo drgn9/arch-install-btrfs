@@ -81,11 +81,11 @@ The build script does all required build work. There is no separate required res
 
 What the build does:
 
-1. Installs build dependencies if needed: `archiso`, `rsync`, `mkosi`, `openssl`, and `git`.
+1. Installs build dependencies if needed: `archiso`, `rsync`, `python`, `openssl`, and `git`.
 2. Prompts for a rescue root password.
 3. Hashes that password into a temporary `rescue-uki/mkosi.rootpw` file.
 4. Copies the live rescue command into the mkosi overlay as `rescue-root`.
-5. Builds the rescue UKI with mkosi.
+5. Builds the rescue UKI with mkosi. mkosi is pinned to version 26: it is downloaded once into `~/.cache/arch-new-install/mkosi/` (outside this repository) and reused on later builds, so behavior does not change when the build machine upgrades its own packages. Bump `MKOSI_VERSION` in `rescue-uki/build.sh` to upgrade mkosi deliberately.
 6. Writes the rescue UKI artifact to `artifacts/arch-rescue.efi`.
 7. Deletes the temporary password file and copied overlay command on exit.
 8. Builds the custom ISO from the Arch `releng` archiso profile.
@@ -157,7 +157,7 @@ Disk layout:
 
 ```text
 Partition  Size       Type          Filesystem          Mount
-1          2 GiB      EFI System    FAT32               /efi
+1          3 GiB      EFI System    FAT32               /efi
 2          remainder  Linux root    Btrfs or LUKS+Btrfs /
 ```
 

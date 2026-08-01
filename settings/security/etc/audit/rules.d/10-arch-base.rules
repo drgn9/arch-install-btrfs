@@ -36,7 +36,7 @@
 
 # System time changes
 -a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
--a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
+-a always,exit -F arch=b32 -S adjtimex -S settimeofday -k time-change
 -w /etc/localtime -p wa -k time-change
 
 # Network identity changes
