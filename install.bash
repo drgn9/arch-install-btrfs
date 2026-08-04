@@ -20,6 +20,7 @@ BTRFS_SUBVOLUMES=(
     @containerd
     @containers
     @machines
+    @portables
     @flatpak
     @libvirt
     @sbctl
@@ -39,6 +40,7 @@ BTRFS_SUBVOLUME_MOUNTS=(
     "@containerd:/var/lib/containerd"
     "@containers:/var/lib/containers"
     "@machines:/var/lib/machines"
+    "@portables:/var/lib/portables"
     "@flatpak:/var/lib/flatpak"
     "@libvirt:/var/lib/libvirt"
     "@sbctl:/var/lib/sbctl"

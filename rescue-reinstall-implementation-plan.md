@@ -54,6 +54,7 @@ These Btrfs subvolumes are deleted and recreated:
 @containerd
 @containers
 @machines
+@portables
 @flatpak
 @libvirt
 @srv

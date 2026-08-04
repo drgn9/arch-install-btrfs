@@ -185,6 +185,7 @@ Subvolume     Mount
 @containerd   /var/lib/containerd
 @containers   /var/lib/containers
 @machines     /var/lib/machines
+@portables    /var/lib/portables
 @flatpak      /var/lib/flatpak
 @libvirt      /var/lib/libvirt
 @sbctl        /var/lib/sbctl
@@ -197,6 +198,8 @@ Subvolume     Mount
 Only `@` is managed by Snapper. `/var/lib/pacman` remains inside `@`, so package database changes are part of root rollback.
 
 The Docker/container subvolumes are created even though Docker packages are not installed by this installer. They make the storage boundary explicit: future container images, layers, and writable state under `/var/lib/docker`, `/var/lib/containerd`, and `/var/lib/containers` stay outside root snapshots.
+
+The `@machines` and `@portables` subvolumes prevent systemd-tmpfiles from creating nested subvolumes inside `@` at `/var/lib/machines` and `/var/lib/portables`.
 
 Installed boot files:
 
@@ -452,7 +455,7 @@ Good uses for root replacement:
 
 Do not choose root replacement for a small targeted fix. Use manual repair when you only need to edit a file, rebuild UKIs, inspect logs, or copy data.
 
-Root replacement affects the `@` subvolume only. It does not roll back sibling subvolumes such as `@home`, `@iwd`, `@sbctl`, `@tailscale`, `@netbird`, `@flatpak`, or `@libvirt`.
+Root replacement affects the `@` subvolume only. It does not roll back sibling subvolumes such as `@home`, `@iwd`, `@sbctl`, `@tailscale`, `@netbird`, `@portables`, `@flatpak`, or `@libvirt`.
 
 Root replacement does this:
 
