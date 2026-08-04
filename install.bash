@@ -288,18 +288,20 @@ setup_snapper_rollback() {
 
     umount /mnt/.snapshots
     rmdir /mnt/.snapshots
-    target_chroot snapper -c root create-config /
+    target_chroot snapper --no-dbus -c root create-config /
     target_chroot btrfs subvolume delete /.snapshots
 
     install -d -m 0750 /mnt/.snapshots
     mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@snapshots" "$root_device" /mnt/.snapshots
     chmod 0750 /mnt/.snapshots
 
-    target_chroot snapper -c root set-config \
+    target_chroot snapper --no-dbus -c root set-config \
         TIMELINE_CREATE=no \
         TIMELINE_CLEANUP=no \
         NUMBER_CLEANUP=no \
         EMPTY_PRE_POST_CLEANUP=no
+    systemctl --root=/mnt disable snapper-timeline.timer
+    target_chroot snapper --no-dbus -c root get-config >/dev/null
 
     copy_settings_file rollback /usr/local/sbin/rollback-root 0755
 
