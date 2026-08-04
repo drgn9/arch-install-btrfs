@@ -12,7 +12,7 @@ Add a third `rescue-root` action:
 Reinstall OS preserving selected state
 ```
 
-The action runs from `arch-rescue`, unlocks the existing installed LUKS root, keeps the existing partition table, ESP, LUKS container, Btrfs filesystem, and fixed preserve-set subvolumes, recreates the OS-managed subvolumes, reinstalls packages/settings, rebuilds/signs UKIs, and recreates the `arch-linux` and `arch-rescue` firmware entries.
+The action runs from `arch-rescue`, unlocks the existing installed LUKS root, keeps the existing partition table, ESP, LUKS container, Btrfs filesystem, and fixed preserve-set subvolumes, recreates the OS-managed subvolumes, reinstalls packages/settings, rebuilds/signs UKIs, reinstalls signed systemd-boot files, and recreates the `Linux Boot Manager` firmware entry.
 
 ## Non-Goals
 
@@ -25,7 +25,7 @@ The action runs from `arch-rescue`, unlocks the existing installed LUKS root, ke
 - Do not support arbitrary non-installer Arch layouts.
 - Do not create a second full installer implementation.
 - Do not add backup/journal machinery; the user is responsible for backups.
-- Keep the installed system policy aligned with the normal installer: mandatory LUKS root, mandatory Secure Boot, mandatory `lockdown=integrity`, direct UKIs, and no bootloader.
+- Keep the installed system policy aligned with the normal installer: mandatory LUKS root, mandatory Secure Boot, mandatory `lockdown=integrity`, signed systemd-boot with signed Type #2 UKIs, and no GRUB.
 
 ## Fixed Preserve Set
 
@@ -123,7 +123,7 @@ After adding `installer-common.bash`, refactor `install.bash` to source it witho
 - [ ] Keep fresh install ESP formatting exactly as-is.
 - [ ] Keep fresh install LUKS creation exactly as-is.
 - [ ] Keep fresh install Secure Boot key creation/enrollment exactly as-is.
-- [ ] Keep fresh install `arch-linux` and `arch-rescue` EFI entries exactly as-is.
+- [ ] Keep fresh install `Linux Boot Manager` EFI entry behavior exactly as-is.
 - [ ] Keep fresh install `fwupd` config/signing exactly as-is.
 - [ ] Run syntax/static checks before adding the rescue reinstall action.
 
@@ -244,12 +244,15 @@ Split target configuration so reinstall can reuse normal installer behavior with
 - [ ] Keep existing `/efi/EFI/Linux/arch-rescue.efi` unless V2 explicitly embeds a replacement rescue UKI artifact.
 - [ ] Sign `/efi/EFI/Linux/arch-linux.efi` with preserved `@sbctl` keys.
 - [ ] Sign `/efi/EFI/Linux/arch-rescue.efi` when present.
+- [ ] Sign `/usr/lib/systemd/boot/efi/systemd-bootx64.efi` to `/usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed` with preserved `@sbctl` keys.
+- [ ] Install systemd-boot files with `bootctl --esp-path=/efi --variables=no install`.
+- [ ] Sign `/efi/EFI/systemd/systemd-bootx64.efi` and `/efi/EFI/BOOT/BOOTX64.EFI`.
 - [ ] Sign `/usr/lib/fwupd/efi/fwupdx64.efi` to `/usr/lib/fwupd/efi/fwupdx64.efi.signed`.
 - [ ] Run `sbctl verify`.
-- [ ] Delete existing `arch-linux` firmware entries by exact label.
-- [ ] Delete existing `arch-rescue` firmware entries by exact label.
-- [ ] Recreate the `arch-linux` firmware entry.
-- [ ] Recreate the `arch-rescue` firmware entry.
+- [ ] Delete existing `arch-linux` firmware entries by exact label (legacy direct-EFISTUB installs).
+- [ ] Delete existing `arch-rescue` firmware entries by exact label (legacy direct-EFISTUB installs).
+- [ ] Delete existing `Linux Boot Manager` firmware entries by exact label.
+- [ ] Recreate the `Linux Boot Manager` firmware entry.
 - [ ] Do not call `sbctl create-keys`.
 - [ ] Do not call `sbctl enroll-keys`.
 
@@ -296,17 +299,17 @@ sudo ./iso/build.sh
 - [ ] Current rescue root replacement action still works.
 - [ ] Rescue UKI still builds.
 - [ ] Custom ISO still builds.
-- [ ] VM fresh install works.
-- [ ] VM `arch-rescue` boot works.
-- [ ] VM rescue reinstall works with passphrase-only unlock config.
-- [ ] VM rescue reinstall works with FIDO2 + PIN unlock config.
-- [ ] VM rescue reinstall works with TPM2 + PIN unlock config if TPM2 VM testing is practical.
+- [ ] Fresh install works on hardware.
+- [ ] `arch-rescue` boot works on hardware.
+- [ ] Rescue reinstall works with passphrase-only unlock config.
+- [ ] Rescue reinstall works with FIDO2 + PIN unlock config.
+- [ ] Rescue reinstall works with TPM2 + PIN unlock config on TPM2 hardware.
 - [ ] Preserved `@home` remains mounted and user data remains present after reinstall.
 - [ ] Preserved `@sbctl` signs new UKIs after reinstall.
 - [ ] Preserved `@iwd` Wi-Fi profiles remain present after reinstall.
 - [ ] Normal boot works after reinstall.
 - [ ] Secure Boot verification succeeds after reinstall.
-- [ ] Firmware entries contain `arch-linux` and `arch-rescue` after reinstall.
+- [ ] Firmware entries contain `Linux Boot Manager` after reinstall.
 
 ## Implementation Order
 
@@ -321,4 +324,4 @@ Use small commits in this order:
 7. Add subvolume deletion/recreation.
 8. Add reinstall package/config generation.
 9. Add UKI signing and firmware entry recreation.
-10. Test in VM before hardware.
+10. Test on hardware.

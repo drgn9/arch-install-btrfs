@@ -1,6 +1,6 @@
 # Arch New Installer
 
-Personal Arch Linux installer for a UEFI laptop/desktop setup built around Btrfs, direct UKI boot, Snapper rollback, and an on-disk rescue UKI.
+Personal Arch Linux installer for a UEFI laptop/desktop setup built around Btrfs, systemd-boot with signed UKIs, Snapper rollback, and an on-disk rescue UKI.
 
 The supported install path is the custom ISO built by this repository. Do not use a stock Arch ISO clone-and-run workflow for normal installs; the installer expects the generated rescue UKI artifact to be present inside the custom ISO.
 
@@ -11,8 +11,8 @@ This installer creates one Arch Linux system with:
 - UEFI boot only.
 - Btrfs root filesystem with sibling subvolumes.
 - One installed kernel: `linux`.
-- Unified Kernel Images booted directly by firmware through EFISTUB.
-- No `systemd-boot`, GRUB, or other bootloader.
+- Unified Kernel Images (Type #2) booted through a signed `systemd-boot` boot menu.
+- No GRUB, shim, or Type #1 loader entries.
 - Mandatory LUKS root encryption with selectable passphrase-only, TPM2 + PIN, or FIDO2 + PIN unlock.
 - Mandatory Secure Boot setup with `sbctl`.
 - Mandatory kernel lockdown in integrity mode.
@@ -20,13 +20,14 @@ This installer creates one Arch Linux system with:
 - No automatic Snapper cleanup. Snapshots stay until you delete them.
 - A rescue UKI installed on the target ESP for rollback/repair without USB media.
 
-EFI files and firmware boot entries intentionally use the same names:
+The boot chain is:
 
 ```text
-EFI file                         EFI boot entry
-/efi/EFI/Linux/arch-linux.efi     arch-linux
-/efi/EFI/Linux/arch-rescue.efi    arch-rescue
+firmware -> signed systemd-boot -> signed arch-linux.efi (default)
+                                -> signed arch-rescue.efi (menu entry)
 ```
+
+`systemd-boot` auto-discovers the UKIs in `/efi/EFI/Linux/`; there are no loader entry files. The firmware gets a single boot entry named `Linux Boot Manager`.
 
 User-facing commands:
 
@@ -46,13 +47,13 @@ sudo ./iso/build.sh
 boot custom ISO
     -> run install-arch
     -> installer copies arch-rescue.efi to the target ESP
-    -> installer creates arch-linux and arch-rescue firmware entries
+    -> installer installs signed systemd-boot and creates the Linux Boot Manager firmware entry
 ```
 
 Secure Boot model:
 
 - Firmware must already be in Secure Boot Setup Mode before the installer runs.
-- The installer creates `sbctl` keys, enrolls them, signs `arch-linux.efi`, signs `arch-rescue.efi`, and verifies signatures.
+- The installer creates `sbctl` keys, enrolls them, signs `systemd-bootx64.efi` (source, ESP copy, and fallback copy), signs `arch-linux.efi`, signs `arch-rescue.efi`, and verifies signatures.
 - `fwupd` is configured for custom Secure Boot keys with `/usr/lib/fwupd/efi/fwupdx64.efi.signed` and `DisableShimForSecureBoot=true`.
 - Secure Boot private keys remain on the installed system under `/var/lib/sbctl`, which is mounted from the `@sbctl` Btrfs subvolume.
 - The rescue UKI is not signed at ISO build time. It is signed during installation with the target system's keys.
@@ -198,15 +199,23 @@ The Docker/container subvolumes are created even though Docker packages are not 
 Installed boot files:
 
 ```text
+/efi/EFI/systemd/systemd-bootx64.efi
+/efi/EFI/BOOT/BOOTX64.EFI
 /efi/EFI/Linux/arch-linux.efi
 /efi/EFI/Linux/arch-rescue.efi
+/efi/loader/loader.conf
 ```
 
-Installed firmware boot entries:
+Installed firmware boot entry:
 
 ```text
-arch-linux
-arch-rescue
+Linux Boot Manager
+```
+
+The `systemd-boot` menu defaults to `arch-linux.efi` and shows for 3 seconds so `arch-rescue.efi` stays one keypress away. To boot the rescue environment once from a running system, without touching the menu:
+
+```bash
+systemctl reboot --boot-loader-entry=arch-rescue.efi
 ```
 
 Package customization:
@@ -309,11 +318,12 @@ Use `rescue-root` when you need an offline repair environment or when the runnin
 Rescue entry points:
 
 ```text
-firmware -> arch-rescue
+systemd-boot menu -> arch-rescue.efi
+one-shot from a running system -> systemctl reboot --boot-loader-entry=arch-rescue.efi
 custom ISO -> rescue-root
 ```
 
-The installed `arch-rescue` firmware entry boots:
+All rescue boot paths load:
 
 ```text
 /efi/EFI/Linux/arch-rescue.efi
@@ -481,8 +491,12 @@ Boot-related installed paths:
 /etc/mkinitcpio.conf               installed from encrypted variant
 /etc/mkinitcpio.d/linux.preset
 /etc/fwupd/fwupd.conf              configured for custom Secure Boot keys
+/efi/EFI/systemd/systemd-bootx64.efi
+/efi/EFI/BOOT/BOOTX64.EFI
 /efi/EFI/Linux/arch-linux.efi
 /efi/EFI/Linux/arch-rescue.efi
+/efi/loader/loader.conf
+/usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed   signed source copy used by future systemd-boot updates
 ```
 
 `iso/build.sh` clears old ISO outputs before each build, then removes rescue UKI and mkosi intermediate outputs after a successful build. The new final ISO remains under `iso/out/`.

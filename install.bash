@@ -144,7 +144,7 @@ show_header() {
         --align center --width 74 --margin "1 2" --padding "1 2" \
         "Arch New Installer" \
         "" \
-        "Niri-only Btrfs + UKI + EFISTUB"
+        "Niri-only Btrfs + UKI + systemd-boot"
 }
 
 show_info() {
@@ -378,7 +378,15 @@ delete_boot_entries_by_label() {
     while read -r boot_num; do
         [[ -n "$boot_num" ]] || continue
         target_chroot efibootmgr --bootnum "$boot_num" --delete-bootnum --unicode || true
-    done < <(target_chroot efibootmgr --unicode 2>/dev/null | awk -v label="$label" '$1 ~ /^Boot[0-9A-Fa-f]{4}\*?$/ && $2 == label { sub(/^Boot/, "", $1); sub(/\*.*/, "", $1); print $1 }')
+    done < <(target_chroot efibootmgr --unicode 2>/dev/null | awk -v label="$label" '
+        {
+            token = $1
+            if (token !~ /^Boot[0-9A-Fa-f]{4}\*?$/) next
+            line = $0
+            sub(/^Boot[0-9A-Fa-f]{4}\*?[ \t]+/, "", line)
+            sub(/\t.*$/, "", line)
+            if (line == label) { sub(/^Boot/, "", token); sub(/\*.*/, "", token); print token }
+        }')
 }
 
 manage_efi_boot_entries() {
@@ -507,8 +515,9 @@ EOF
         target_chroot chmod 0640 /etc/polkit-1/rules.d/00-udisks-wheel.rules
     fi
 
-    install -d -m 0755 /mnt/boot /mnt/efi/EFI/Linux /mnt/etc/cmdline.d /mnt/etc/mkinitcpio.d
+    install -d -m 0755 /mnt/boot /mnt/efi/EFI/Linux /mnt/efi/loader /mnt/etc/cmdline.d /mnt/etc/mkinitcpio.d
     install -D -m 0644 "$RESCUE_UKI_SOURCE" "/mnt$RESCUE_UKI_TARGET"
+    copy_settings_file boot /efi/loader/loader.conf
 
     copy_settings_file boot /etc/cmdline.d/defaults.conf
     copy_settings_file boot /etc/cmdline.d/security.conf
@@ -542,11 +551,6 @@ EOF
     rm -f /mnt/boot/initramfs-*.img
 
     target_chroot mkinitcpio -P
-
-    delete_boot_entries_by_label "arch-linux"
-    delete_boot_entries_by_label "arch-rescue"
-    target_chroot efibootmgr --create --disk "$target_disk" --part 1 --label "arch-rescue" --loader "\\EFI\\Linux\\arch-rescue.efi" --unicode
-    target_chroot efibootmgr --create --disk "$target_disk" --part 1 --label "arch-linux" --loader "\\EFI\\Linux\\arch-linux.efi" --unicode
 
     enable_target_service tailscaled.service
     enable_target_service pcscd.service
@@ -608,8 +612,31 @@ EOF
     if target_chroot sbctl status | grep -q 'Setup Mode:.*Enabled'; then
         target_chroot sbctl create-keys
         target_chroot sbctl enroll-keys -m
+
+        # Sign the systemd-boot source first so bootctl copies an already
+        # signed binary to the ESP, and so future systemd updates re-sign it
+        # via the sbctl pacman hook before systemd-boot-update copies it.
+        target_chroot sbctl sign -s \
+            -o /usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed \
+            /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+
+        target_chroot bootctl --esp-path=/efi --variables=no install
+
+        target_chroot sbctl sign -s /efi/EFI/systemd/systemd-bootx64.efi
+        target_chroot sbctl sign -s /efi/EFI/BOOT/BOOTX64.EFI
         target_chroot sbctl sign -s /efi/EFI/Linux/arch-linux.efi
         target_chroot sbctl sign -s "$RESCUE_UKI_TARGET"
+
+        delete_boot_entries_by_label "arch-linux"
+        delete_boot_entries_by_label "arch-rescue"
+        delete_boot_entries_by_label "Linux Boot Manager"
+        target_chroot efibootmgr --create \
+            --disk "$target_disk" \
+            --part 1 \
+            --label "Linux Boot Manager" \
+            --loader "\\EFI\\systemd\\systemd-bootx64.efi" \
+            --unicode
+
         if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
             target_chroot sbctl sign -s -o /usr/lib/fwupd/efi/fwupdx64.efi.signed /usr/lib/fwupd/efi/fwupdx64.efi
         fi

@@ -1,6 +1,6 @@
 # systemd-boot Implementation Plan
 
-Status: proposal only. The installer still uses direct EFISTUB UKI boot unless this plan is explicitly approved and implemented.
+Status: implemented. The installer installs signed `systemd-boot` as a UEFI boot menu in front of the signed UKIs and creates a single `Linux Boot Manager` firmware entry. This document is kept as the design record and rollback reference.
 
 This document describes the simplest possible migration from direct EFISTUB UKI boot to `systemd-boot`, while preserving the current installer policy:
 
@@ -257,10 +257,10 @@ The simple plan is:
 - Do not add a custom pacman hook initially.
 - Let Arch/systemd manage `systemd-boot` updates.
 - Register the signed `/usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed` output with `sbctl -s`.
-- Confirm in VM that `sbctl` re-signs the source `.signed` output after a `systemd` package upgrade.
-- Confirm in VM that `bootctl update` copies the signed file to the ESP.
+- Confirm on hardware that `sbctl` re-signs the source `.signed` output after a `systemd` package upgrade.
+- Confirm on hardware that `bootctl update` copies the signed file to the ESP.
 
-If VM testing shows the `sbctl` database does not preserve the input-to-output signing mapping reliably, add one small pacman hook later.
+If hardware testing shows the `sbctl` database does not preserve the input-to-output signing mapping reliably, add one small pacman hook later.
 
 Do not add the hook unless testing proves it is needed.
 
@@ -547,10 +547,10 @@ Whitespace check:
 git diff --check
 ```
 
-Rescue UKI summary:
+Rescue UKI summary (uses the pinned mkosi checkout created by `rescue-uki/build.sh`):
 
 ```bash
-mkosi -C rescue-uki --no-pager summary
+PYTHONPATH="${XDG_CACHE_HOME:-$HOME/.cache}/arch-new-install/mkosi/v26" python3 -m mkosi -C rescue-uki --no-pager summary
 ```
 
 ISO build:
@@ -559,16 +559,19 @@ ISO build:
 sudo ./iso/build.sh
 ```
 
-## VM Test Matrix
+## Hardware Test Matrix
+
+This installer targets physical machines only; all tests run on real hardware.
 
 Fresh install tests:
 
 - Install with passphrase-only LUKS unlock.
-- Install with TPM2 + PIN when TPM is available in VM or hardware test system.
+- Install with TPM2 + PIN when TPM is available on the test machine.
 - Install with FIDO2 + PIN on hardware if available.
 - Confirm `systemd-boot` menu appears.
 - Confirm default entry boots normal Arch.
 - Confirm rescue entry boots `arch-rescue`.
+- Confirm `systemctl reboot --boot-loader-entry=arch-rescue.efi` boots rescue once, then the default entry again on the next boot.
 - Confirm Secure Boot remains enabled after firmware keys are enrolled.
 - Confirm kernel reports Secure Boot enabled.
 - Confirm kernel command line includes `lockdown=integrity`.
@@ -580,7 +583,7 @@ Firmware entry tests:
 - Confirm exactly one `Linux Boot Manager` entry is created for this install.
 - Confirm old `arch-linux` entries are deleted.
 - Confirm old `arch-rescue` entries are deleted.
-- Re-run install in the same VM and confirm duplicate `Linux Boot Manager` entries are not accumulated.
+- Re-run install on the same machine and confirm duplicate `Linux Boot Manager` entries are not accumulated.
 
 Signing tests:
 
@@ -595,15 +598,15 @@ Update tests:
 
 - Run `sudo pacman -Syu` after install.
 - If `systemd` updates, confirm `systemd-boot` remains signed.
-- Run `bootctl update` manually in a VM and confirm it uses the signed `.efi.signed` source.
+- Run `bootctl update` manually and confirm it uses the signed `.efi.signed` source.
 - Run `sbctl verify` after the update.
 - Reboot after the update and confirm normal boot still works.
 - Select rescue after the update and confirm rescue still works.
 
 Negative tests:
 
-- Temporarily remove or rename `/efi/EFI/Linux/arch-rescue.efi` in a VM and confirm normal boot still works.
-- Temporarily remove or rename `/efi/EFI/Linux/arch-linux.efi` in a VM and confirm rescue remains selectable.
+- Temporarily remove or rename `/efi/EFI/Linux/arch-rescue.efi` and confirm normal boot still works.
+- Temporarily remove or rename `/efi/EFI/Linux/arch-linux.efi` and confirm rescue remains selectable.
 - Confirm `editor no` prevents interactive command-line editing from the boot menu.
 
 ## Rollback Plan To Direct EFISTUB
@@ -696,17 +699,16 @@ Those are still the direct EFISTUB boot targets.
 - [ ] Remove direct EFISTUB wording from user-facing docs.
 - [ ] Keep a note that UKIs remain the boot payloads.
 
-### Phase 6: VM and Hardware Validation
+### Phase 6: Hardware Validation
 
 - [ ] Run static checks.
 - [ ] Build ISO.
-- [ ] Fresh install in VM.
+- [ ] Fresh install on physical hardware.
 - [ ] Verify boot menu.
 - [ ] Verify normal boot.
 - [ ] Verify rescue boot.
 - [ ] Verify Secure Boot signatures.
 - [ ] Verify update behavior.
-- [ ] Test on real hardware only after VM path is clean.
 
 ## Final Decision Criteria
 
