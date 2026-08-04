@@ -451,16 +451,6 @@ EOF
     copy_settings_file network /etc/systemd/system/iwd.service.d/override.conf
     enable_target_service iwd.service
 
-    # Carry Wi-Fi credentials from the live session into the target so the
-    # network joined during installation works on first boot.
-    mapfile -t iwd_known_networks < <(find /var/lib/iwd -maxdepth 1 -type f \
-        \( -name '*.psk' -o -name '*.open' -o -name '*.8021x' \) 2>/dev/null)
-    if (( ${#iwd_known_networks[@]} > 0 )); then
-        show_info "Copying ${#iwd_known_networks[@]} iwd known network(s) into the target"
-        install -d -m 0700 /mnt/var/lib/iwd
-        cp -a -- "${iwd_known_networks[@]}" /mnt/var/lib/iwd/
-    fi
-
     copy_settings_file network /etc/systemd/resolved.conf
     enable_target_service systemd-networkd.service
     enable_target_service systemd-resolved.service
@@ -600,7 +590,9 @@ EOF
 
     case "$unlock_method" in
         tpm2)
-            echo "Enrolling TPM2 LUKS key with PIN. The install user's password authorizes enrollment and is removed afterward."
+            echo "Enrolling TPM2 LUKS key with PIN."
+            echo "When asked for the existing LUKS passphrase, enter the password for $username."
+            echo "That password authorizes enrollment and its LUKS slot is removed afterward."
             target_chroot systemd-cryptenroll "$root_part" \
                 --wipe-slot=password \
                 --tpm2-device=auto \
@@ -611,7 +603,8 @@ EOF
         fido2)
             echo "Insert your FIDO2 key, then press Enter to enroll it with a PIN."
             read -r
-            echo "The install user's password authorizes enrollment and is removed afterward."
+            echo "When asked for the existing LUKS passphrase, enter the password for $username."
+            echo "That password authorizes enrollment and its LUKS slot is removed afterward."
             target_chroot systemd-cryptenroll "$root_part" \
                 --wipe-slot=password \
                 --fido2-device=auto \
@@ -764,18 +757,10 @@ fi
 gum style --foreground 212 --bold --margin "1 0" "Installation Summary"
 gum style --border rounded --border-foreground 212 --padding "1 2" --margin "0 2" \
     "Target disk:     $target_disk" \
-    "Disk layout:     GPT: 2 GiB ESP + Btrfs root remainder" \
     "Secure wipe:     $wipe_mode" \
-    "Encryption:      yes" \
-    "Unlock method:   $unlock_method" \
-    "Secure Boot:     yes" \
-    "AppArmor:        yes" \
-    "Lockdown:        integrity" \
+    "Unlock method:   $unlock_method_label" \
     "Bluetooth off:   $disable_bluetooth" \
     "Thunderbolt off: $disable_thunderbolt" \
-    "Desktop:         Niri" \
-    "Network:         iwd + systemd-networkd" \
-    "GPU packages:    $gpu_label" \
     "Hostname:        $hostname" \
     "Timezone:        $timezone" \
     "Username:        $username"

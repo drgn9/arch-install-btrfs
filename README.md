@@ -127,7 +127,7 @@ install-arch
 
 The selected target disk is destroyed. Read every prompt carefully.
 
-The installer checks internet access before disk work starts. If the system is offline, it opens the `impala` Wi-Fi TUI. Wi-Fi credentials joined in the live environment are copied into the installed system so first boot can reconnect.
+The installer checks internet access before disk work starts. If the system is offline, it opens the `impala` Wi-Fi TUI. Wi-Fi credentials from the live environment are not copied into the installed system; configure Wi-Fi after installation.
 
 Fixed security policy:
 
@@ -149,7 +149,7 @@ Installer prompts:
 LUKS unlock behavior:
 
 - Passphrase-only installs keep the passphrase unlock method.
-- TPM2 + PIN and FIDO2 + PIN installs use the install user's password only as a temporary enrollment passphrase, then remove that password slot. Add backup unlock methods later with `systemd-cryptenroll` if you want them.
+- TPM2 + PIN and FIDO2 + PIN installs use the install user's password only as a temporary enrollment passphrase. When enrollment asks for the existing LUKS passphrase, enter the install user's password. The installer then removes that password slot. Add backup unlock methods later with `systemd-cryptenroll` if you want them.
 
 Secure Boot requirement:
 
