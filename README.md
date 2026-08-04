@@ -16,6 +16,7 @@ This installer creates one Arch Linux system with:
 - Mandatory LUKS root encryption with selectable passphrase-only, TPM2 + PIN, or FIDO2 + PIN unlock.
 - Mandatory Secure Boot setup with `sbctl`.
 - Mandatory kernel lockdown in integrity mode.
+- Default-deny nftables host firewall with selectable persistent profiles.
 - Snapper root snapshots with `snap-pac` pre/post pacman snapshots.
 - No automatic Snapper cleanup. Snapshots stay until you delete them.
 - A rescue UKI installed on the target ESP for rollback/repair without USB media.
@@ -32,9 +33,10 @@ firmware -> signed systemd-boot -> signed arch-linux.efi (default)
 User-facing commands:
 
 ```text
-install-arch    run the installer from the custom ISO
-rollback-root   rollback a pacman transaction from the installed system
-rescue-root     repair or replace the root subvolume from rescue media
+install-arch      run the installer from the custom ISO
+firewall-profile  select the persistent nftables firewall profile
+rollback-root     rollback a pacman transaction from the installed system
+rescue-root       repair or replace the root subvolume from rescue media
 ```
 
 Build/install flow:
@@ -236,7 +238,7 @@ Settings customization:
 settings/access/       sudo and polkit policy
 settings/boot/         kernel command line, mkinitcpio config, UKI preset
 settings/hardware/     Bluetooth, Thunderbolt, Wi-Fi, and fwupd configuration
-settings/network/      networkd, resolved, iwd, and network sysctls
+settings/network/      networkd, resolved, iwd, nftables, and network sysctls
 settings/power/        sleep, watchdog, and zram policy
 settings/rollback/     rollback-root helper
 settings/security/     AppArmor, coredumps, kernel sysctls, and module policy
@@ -253,6 +255,31 @@ installs to:
 ```text
 /usr/local/sbin/rollback-root
 ```
+
+### Firewall
+
+The installer enables `nftables.service` with the `drop` profile. It permits
+outbound connections and required network control traffic while dropping new
+inbound connections and all forwarding. The rules replace only the
+installer-owned `inet workstation` table so independently managed tables,
+including Tailscale's, are preserved.
+
+After `fzf` is available through `mise`, switch persistent profiles with:
+
+```bash
+firewall-profile
+```
+
+Available profiles:
+
+```text
+blackout  block all local IPv4 and IPv6 networking except loopback
+drop      default workstation policy installed by the installer
+general   add physical-LAN ping, multicast membership, and mDNS discovery
+```
+
+The `general` profile only permits discovery traffic. It does not install or
+configure printing software and does not open an inbound IPP/CUPS port.
 
 ## 3. Rollback
 

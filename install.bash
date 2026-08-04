@@ -421,6 +421,8 @@ manage_efi_boot_entries() {
 }
 
 configure_target() {
+    local firewall_profile
+
     printf '%s\n' "$hostname" >/mnt/etc/hostname
 
     write_target_file /etc/hosts 0644 <<EOF
@@ -464,6 +466,14 @@ EOF
     enable_target_service systemd-resolved.service
     enable_target_service systemd-timesyncd.service
     enable_target_service systemd-networkd-wait-online.service
+
+    for firewall_profile in blackout drop general; do
+        copy_settings_file network "/usr/local/share/firewall-profiles/$firewall_profile.nft"
+        target_chroot nft --check --file "/usr/local/share/firewall-profiles/$firewall_profile.nft"
+    done
+    copy_settings_source network/usr/local/share/firewall-profiles/drop.nft /etc/nftables.conf
+    copy_settings_file network /usr/local/sbin/firewall-profile 0755
+    enable_target_service nftables.service
 
     copy_settings_file network /etc/sysctl.d/99-firewall-settings.conf
     copy_settings_file power /etc/sysctl.d/99-watchdog-settings.conf

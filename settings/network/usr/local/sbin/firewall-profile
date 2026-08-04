@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+readonly PROFILE_DIR=/usr/local/share/firewall-profiles
+readonly CONFIG_FILE=/etc/nftables.conf
+profiles=(blackout drop general)
+target_tmp=
+
+die() {
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+cleanup() {
+    if [[ -n "$target_tmp" ]]; then
+        sudo rm -f -- "$target_tmp"
+    fi
+}
+trap cleanup EXIT
+
+command -v fzf >/dev/null 2>&1 || die "fzf is required; install it through mise first"
+
+if ! choice=$(printf '%s\n' "${profiles[@]}" | fzf \
+    --style=full \
+    --layout=reverse \
+    --height=10% \
+    --prompt="choose firewall profile: "); then
+    echo "No firewall profile selected. Current workstation table:"
+    if ! sudo nft list table inet workstation; then
+        sudo nft list ruleset
+    fi
+    exit 0
+fi
+
+profile="$PROFILE_DIR/$choice.nft"
+[[ -r "$profile" ]] || die "missing firewall profile: $profile"
+
+sudo nft --check --file "$profile"
+
+target_tmp=$(sudo mktemp "$CONFIG_FILE.XXXXXX")
+sudo install -m 0644 -- "$profile" "$target_tmp"
+sudo mv -f -- "$target_tmp" "$CONFIG_FILE"
+target_tmp=
+
+sudo systemctl enable nftables.service
+sudo systemctl restart nftables.service
+
+echo "Activated firewall profile: $choice"
+sudo nft list table inet workstation

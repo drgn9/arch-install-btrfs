@@ -1,0 +1,24 @@
+#!/usr/bin/nft -f
+
+# Blackout blocks all local IPv4 and IPv6 networking except loopback.
+destroy table inet my_table
+destroy table inet workstation
+
+table inet workstation {
+    chain input {
+        type filter hook input priority filter; policy drop;
+        iifname "lo" counter accept comment "allow loopback"
+        counter comment "default input drop"
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+        counter comment "default forward drop"
+    }
+
+    chain output {
+        type filter hook output priority filter; policy drop;
+        oifname "lo" counter accept comment "allow loopback"
+        counter comment "default output drop"
+    }
+}

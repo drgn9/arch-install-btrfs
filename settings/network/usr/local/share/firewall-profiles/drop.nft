@@ -1,0 +1,47 @@
+#!/usr/bin/nft -f
+
+# Remove the legacy profile table, then replace only the table managed here.
+# Never flush the full ruleset because Tailscale may own separate tables.
+destroy table inet my_table
+destroy table inet workstation
+
+table inet workstation {
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        iifname "lo" counter accept comment "allow loopback"
+        ct state invalid counter drop comment "drop invalid traffic"
+        ct state { established, related } counter accept comment "allow tracked replies"
+
+        meta nfproto ipv4 udp sport 67 udp dport 68 counter accept comment "allow DHCPv4 replies"
+        meta nfproto ipv6 udp sport 547 udp dport 546 counter accept comment "allow DHCPv6 replies"
+
+        icmp type {
+            destination-unreachable,
+            time-exceeded,
+            parameter-problem
+        } counter accept comment "allow essential ICMP"
+
+        icmpv6 type {
+            destination-unreachable,
+            packet-too-big,
+            time-exceeded,
+            parameter-problem,
+            mld-listener-query,
+            nd-router-advert,
+            nd-neighbor-solicit,
+            nd-neighbor-advert
+        } counter accept comment "allow essential ICMPv6"
+
+        counter comment "default input drop"
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+        counter comment "default forward drop"
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+    }
+}
