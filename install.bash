@@ -193,7 +193,6 @@ cleanup() {
     local status=$3
 
     show_error "Installation failed at line $line (exit $status): $command"
-    rm -f /mnt/etc/sudoers.d/99-installer-aur-nopasswd 2>/dev/null || true
     umount -R /mnt 2>/dev/null || true
     cryptsetup close cryptroot 2>/dev/null || true
     exit "$status"
@@ -593,24 +592,6 @@ EOF
 
     printf '%s:%s\n' "$username" "$userpass" | target_chroot chpasswd
 
-    printf '%%wheel ALL=(ALL) NOPASSWD: ALL\n' >/mnt/etc/sudoers.d/99-installer-aur-nopasswd
-    chmod 0440 /mnt/etc/sudoers.d/99-installer-aur-nopasswd
-
-    if ! target_chroot bash -lc 'command -v yay >/dev/null 2>&1'; then
-        # shellcheck disable=SC2016
-        if ! target_chroot runuser -u "$username" -- bash -lc '
-            set -euo pipefail
-            tmpdir=$(mktemp -d)
-            trap "rm -rf \"$tmpdir\"" EXIT
-            git clone https://aur.archlinux.org/yay-bin.git "$tmpdir/yay-bin"
-            cd "$tmpdir/yay-bin"
-            makepkg -si --noconfirm
-        ' 2>&1 | tee /mnt/var/log/yay-install.log; then
-            show_warn "yay build failed; install it manually after first boot. Log: /var/log/yay-install.log"
-        fi
-    fi
-
-    rm -f /mnt/etc/sudoers.d/99-installer-aur-nopasswd
     copy_settings_file access /etc/sudoers.d/wheel 0440
 
     setup_snapper_rollback
