@@ -1,4 +1,5 @@
 NAME="Arch Linux"
+PRETTY_NAME="Arch Rescue"
 ID=arch
 VARIANT="Rescue UKI"
 VARIANT_ID=rescue

@@ -12,18 +12,55 @@ opened_luks=no
 mounted=no
 top_mounted=no
 cleanup_enabled=yes
+UI_ACCENT=212
+UI_ACTION=214
+UI_SUCCESS=82
+UI_WIDTH=74
+
+show_header() {
+    clear
+    gum style \
+        --foreground "$UI_ACCENT" --border-foreground "$UI_ACCENT" --border double \
+        --align center --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
+        "Arch Rescue"
+}
+
+show_section() {
+    gum style \
+        --foreground "$UI_ACCENT" --border-foreground "$UI_ACCENT" --border rounded \
+        --bold --width "$UI_WIDTH" --margin "1 2" --padding "0 2" \
+        "$1"
+}
+
+show_action() {
+    local title=$1
+    shift
+
+    gum style \
+        --foreground "$UI_ACTION" --border-foreground "$UI_ACTION" --border double \
+        --bold --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
+        "$title" "" "$@"
+}
+
+show_info() {
+    gum log --level info "$1"
+}
+
+show_warn() {
+    gum log --level warn "$1"
+}
+
+show_success() {
+    gum style --foreground "$UI_SUCCESS" --bold --margin "1 2" "$1"
+}
 
 die() {
-    printf 'ERROR: %s\n' "$1" >&2
+    gum log --level error "$1" >&2
     exit 1
 }
 
 confirm() {
-    local prompt=$1
-    local answer
-
-    read -rp "$prompt [y/N] " answer
-    [[ "$answer" == y || "$answer" == Y || "$answer" == yes || "$answer" == YES ]]
+    gum confirm "$1"
 }
 
 cleanup_on_failure() {
@@ -64,6 +101,7 @@ select_target() {
         die '/dev/mapper/cryptroot already exists. Close it first: cryptsetup close cryptroot'
     fi
 
+    show_section "System Disk"
     devices=$(lsblk --nodeps --paths --list --noheadings --sort=size --output=name,size,type,model | awk '$3 == "disk"')
     [[ -n "$devices" ]] || die 'No disks found.'
 
@@ -75,13 +113,18 @@ select_target() {
 
     root_device="$root_part"
     if cryptsetup isLuks "$root_part"; then
+        show_section "Unlock Root"
         unlock=$(gum choose --header "How do you want to unlock $root_part?" \
             'FIDO2 or TPM2 token (with PIN)' \
             'Passphrase or recovery key')
         if [[ "$unlock" == 'FIDO2 or TPM2 token (with PIN)' ]]; then
-            echo 'If you enrolled a FIDO2 key, insert it now. You will be asked for your PIN.'
+            show_action "ACTION REQUIRED: SECURITY TOKEN" \
+                "Insert your FIDO2 key if you use one." \
+                "The next prompt asks for your token PIN."
             cryptsetup open --token-only "$root_part" cryptroot
         else
+            show_action "ACTION REQUIRED: LUKS UNLOCK" \
+                "Enter a LUKS passphrase or recovery key at the next prompt."
             cryptsetup open --disable-external-tokens "$root_part" cryptroot
         fi
         opened_luks=yes
@@ -99,46 +142,37 @@ mount_installed_system() {
     if [[ -d /mnt/efi ]]; then
         mount -o fmask=0137,dmask=0027 "$efi_part" /mnt/efi
     else
-        echo 'WARNING: /mnt/efi does not exist on the target; skipping the ESP mount.' >&2
+        show_warn '/mnt/efi does not exist; the ESP was not mounted.'
     fi
 
     # @sbctl holds the Secure Boot keys; without it no UKI can be signed.
     install -d -m 0755 /mnt/var/lib/sbctl
     if ! mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@sbctl" "$root_device" /mnt/var/lib/sbctl; then
-        echo 'WARNING: could not mount @sbctl at /mnt/var/lib/sbctl; sbctl signing will be unavailable.' >&2
+        show_warn 'Could not mount @sbctl; UKI signing will be unavailable.'
     fi
 }
 
 mount_for_repair() {
+    local -a next_steps
+
     select_target
+    show_section "Repair Environment"
     mount_installed_system
 
     cleanup_enabled=no
     trap - INT TERM
 
-    cat <<EOF
-
-Your root subvolume is mounted at /mnt.
-The ESP is mounted at /mnt/efi when present.
-The @sbctl subvolume is mounted at /mnt/var/lib/sbctl when present.
-
-Enter the installed system:
-
-    arch-chroot /mnt
-
-Inside the chroot, mount the remaining fstab entries if needed:
-
-    mount -a
-
-When you are finished:
-
-    umount -R /mnt
-EOF
-
+    show_success "Installed system mounted at /mnt."
+    next_steps=(
+        "Enter the system:  arch-chroot /mnt"
+        "Mount the rest:    mount -a"
+        "Leave the chroot:  exit"
+        "Unmount system:    umount -R /mnt"
+    )
     if [[ "$opened_luks" == yes ]]; then
-        printf '    cryptsetup close cryptroot\n'
+        next_steps+=("Close encryption:  cryptsetup close cryptroot")
     fi
-    echo ''
+    show_action "NEXT STEPS" "${next_steps[@]}"
 }
 
 list_snapshots() {
@@ -185,6 +219,7 @@ replace_root_from_snapshot() {
     # or the system will not boot.
     [[ -d /mnt/@sbctl/keys ]] || die 'sbctl keys not found at @sbctl/keys; refusing to replace @ because the rebuilt UKI could not be signed.'
 
+    show_section "Choose Snapshot"
     snapshots=$(list_snapshots)
     [[ -n "$snapshots" ]] || die 'No Snapper snapshots found.'
 
@@ -192,8 +227,10 @@ replace_root_from_snapshot() {
     snapshot=${selection%% *}
     [[ -d "/mnt/@snapshots/$snapshot/snapshot" ]] || die "Snapshot $snapshot is invalid."
 
-    printf '\nSelected snapshot: %s\n' "$selection"
-    confirm 'Replace @ from this snapshot?' || die 'Root replacement cancelled.'
+    show_action "CONFIRM ROOT REPLACEMENT" \
+        "Restore snapshot: $selection" \
+        "The current root will be kept as an @old-* subvolume."
+    confirm 'Replace the current root?' || die 'Root replacement cancelled.'
 
     timestamp=$(date +%Y%m%d-%H%M%S)
     old_root="@old-$timestamp"
@@ -201,6 +238,8 @@ replace_root_from_snapshot() {
     [[ -d /mnt/@ ]] || die 'Current root subvolume @ was not found.'
     [[ ! -e "/mnt/$old_root" && ! -e "/mnt/$new_root" ]] || die 'Temporary rollback subvolume name already exists.'
 
+    show_section "Restoring Root"
+    show_info "Creating replacement from snapshot $snapshot"
     btrfs subvolume snapshot "/mnt/@snapshots/$snapshot/snapshot" "/mnt/$new_root"
     [[ -d "/mnt/$new_root" ]] || die 'Replacement root subvolume was not created.'
 
@@ -228,18 +267,11 @@ replace_root_from_snapshot() {
         opened_luks=no
     fi
 
-    cat <<EOF
-
-Root replacement complete.
-
-The previous root was kept as: $old_root
-
-Delete it manually later after booting successfully:
-
-    sudo mount -o subvolid=5 $root_device /mnt
-    sudo btrfs subvolume delete /mnt/$old_root
-    sudo umount /mnt
-EOF
+    show_success "Root restored from snapshot $snapshot."
+    show_action "OLD ROOT RETAINED" \
+        "$old_root" \
+        "Keep it until the restored system is verified." \
+        "Delete it later with Btrfs Assistant or btrfs subvolume delete."
 
     if confirm 'Reboot now?'; then
         systemctl reboot
@@ -250,11 +282,13 @@ if [[ ${EUID:-0} -ne 0 ]]; then
     die 'This script must be run as root.'
 fi
 
-action=$(gum choose --header 'Rescue action:' \
-    'Mount installation and enter a repair shell' \
-    'Replace @ from a Snapper snapshot')
+show_header
+show_section "Choose Rescue Action"
+action=$(gum choose --header 'What do you need to do?' \
+    'Repair installed system' \
+    'Restore root from snapshot')
 
 case "$action" in
-    'Mount installation and enter a repair shell') mount_for_repair ;;
-    'Replace @ from a Snapper snapshot') replace_root_from_snapshot ;;
+    'Repair installed system') mount_for_repair ;;
+    'Restore root from snapshot') replace_root_from_snapshot ;;
 esac

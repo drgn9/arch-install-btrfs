@@ -28,7 +28,7 @@ firmware -> signed systemd-boot -> signed arch-linux.efi (default)
                                 -> signed arch-rescue.efi (menu entry)
 ```
 
-`systemd-boot` auto-discovers the UKIs in `/efi/EFI/Linux/`; there are no loader entry files. The firmware gets a single boot entry named `Linux Boot Manager`.
+`systemd-boot` auto-discovers the UKIs in `/efi/EFI/Linux/`; there are no loader entry files. The rescue UKI is displayed as `Arch Rescue`. The firmware gets a single boot entry named `Linux Boot Manager`.
 
 User-facing commands:
 
@@ -348,7 +348,7 @@ Use `rescue-root` when you need an offline repair environment or when the runnin
 Rescue entry points:
 
 ```text
-systemd-boot menu -> arch-rescue.efi
+systemd-boot menu -> Arch Rescue
 one-shot from a running system -> systemctl reboot --boot-loader-entry=arch-rescue.efi
 custom ISO -> rescue-root
 ```
@@ -368,8 +368,8 @@ rescue-root
 `rescue-root` is a guided Bash command with two actions:
 
 ```text
-Mount installation and enter a repair shell
-Replace @ from a Snapper snapshot
+Repair installed system
+Restore root from snapshot
 ```
 
 It assumes the disk layout created by this installer:

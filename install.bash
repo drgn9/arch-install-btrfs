@@ -139,14 +139,40 @@ if [[ ${#deps_needed[@]} -gt 0 ]]; then
     pacman -S --needed --noconfirm gum impala cryptsetup efibootmgr util-linux dosfstools btrfs-progs parted pciutils arch-install-scripts
 fi
 
+UI_ACCENT=212
+UI_ACTION=214
+UI_SUCCESS=82
+UI_WIDTH=74
+
 show_header() {
     clear
     gum style \
-        --foreground 212 --border-foreground 212 --border double \
-        --align center --width 74 --margin "1 2" --padding "1 2" \
+        --foreground "$UI_ACCENT" --border-foreground "$UI_ACCENT" --border double \
+        --align center --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
         "Arch New Installer" \
         "" \
         "Niri-only Btrfs + UKI + systemd-boot"
+}
+
+show_section() {
+    gum style \
+        --foreground "$UI_ACCENT" --border-foreground "$UI_ACCENT" --border rounded \
+        --bold --width "$UI_WIDTH" --margin "1 2" --padding "0 2" \
+        "$1"
+}
+
+show_action() {
+    local title=$1
+    shift
+
+    gum style \
+        --foreground "$UI_ACTION" --border-foreground "$UI_ACTION" --border double \
+        --bold --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
+        "$title" "" "$@"
+}
+
+show_success() {
+    gum style --foreground "$UI_SUCCESS" --bold --margin "1 2" "$1"
 }
 
 show_info() {
@@ -396,7 +422,7 @@ delete_boot_entries_by_label() {
 manage_efi_boot_entries() {
     local entries entry boot_num
 
-    show_info "Managing EFI boot entries"
+    show_section "EFI Boot Entries"
     efibootmgr --unicode || true
 
     while true; do
@@ -590,32 +616,42 @@ EOF
     setup_snapper_rollback
     target_chroot passwd -l root >/dev/null
 
+    if [[ "$unlock_method" != "passphrase" ]]; then
+        show_section "LUKS Token Enrollment"
+    fi
+
     case "$unlock_method" in
         tpm2)
-            echo "Enrolling TPM2 LUKS key with PIN."
-            echo "When asked for the existing LUKS passphrase, enter the password for $username."
-            echo "That password authorizes enrollment and its LUKS slot is removed afterward."
+            show_action "ACTION REQUIRED: TPM2 + PIN" \
+                "When asked for the existing LUKS passphrase," \
+                "enter the password for $username." \
+                "The temporary password slot is removed after enrollment."
             target_chroot systemd-cryptenroll "$root_part" \
                 --wipe-slot=password \
                 --tpm2-device=auto \
                 --tpm2-with-pin=yes \
                 --tpm2-pcrs=
-            show_info "Only TPM2+PIN remains enrolled for LUKS unlock. Add backup methods post-install with systemd-cryptenroll."
+            show_success "TPM2 + PIN enrolled for LUKS unlock."
             ;;
         fido2)
-            echo "Insert your FIDO2 key, then press Enter to enroll it with a PIN."
+            show_action "ACTION REQUIRED: INSERT FIDO2 KEY" \
+                "Insert your FIDO2 key now." \
+                "Press Enter when the key is ready."
             read -r
-            echo "When asked for the existing LUKS passphrase, enter the password for $username."
-            echo "That password authorizes enrollment and its LUKS slot is removed afterward."
+            show_action "ACTION REQUIRED: LUKS PASSPHRASE" \
+                "When asked for the existing LUKS passphrase," \
+                "enter the password for $username." \
+                "The temporary password slot is removed after enrollment."
             target_chroot systemd-cryptenroll "$root_part" \
                 --wipe-slot=password \
                 --fido2-device=auto \
                 --fido2-with-client-pin=yes \
                 --fido2-credential-algorithm=eddsa
-            show_info "Only FIDO2+PIN remains enrolled for LUKS unlock. Add backup methods post-install with systemd-cryptenroll."
+            show_success "FIDO2 + PIN enrolled for LUKS unlock."
             ;;
     esac
 
+    show_section "Secure Boot Enrollment"
     if target_chroot sbctl status | grep -q 'Setup Mode:.*Enabled'; then
         target_chroot sbctl create-keys
         target_chroot sbctl enroll-keys -m
@@ -666,7 +702,7 @@ kblayout=us
 locale=en_US.UTF-8
 loadkeys "$kblayout" || show_warn "Could not load keymap $kblayout (no console access?); continuing"
 
-gum style --foreground 212 --bold --margin "1 0" "LUKS Unlock"
+show_section "LUKS Unlock"
 unlock_choices=("FIDO2 + PIN" "Passphrase only")
 if [[ -c /dev/tpmrm0 ]]; then
     unlock_choices=("TPM2 + PIN" "${unlock_choices[@]}")
@@ -678,7 +714,7 @@ case "$unlock_method_label" in
     "Passphrase only") unlock_method=passphrase ;;
 esac
 
-gum style --foreground 212 --bold --margin "1 0" "Secure Boot"
+show_section "Secure Boot"
 setup_mode=$(od -An -t u1 -j4 -N1 /sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | tr -d ' ')
 if [[ "$setup_mode" != "1" ]]; then
     show_error "Secure Boot Setup Mode is not enabled. Clear firmware Secure Boot keys and re-run the installer."
@@ -687,7 +723,7 @@ fi
 show_info "Secure Boot setup is mandatory and firmware Setup Mode is enabled"
 show_info "Kernel lockdown integrity mode is mandatory"
 
-gum style --foreground 212 --bold --margin "1 0" "Hardware"
+show_section "Hardware"
 if gum confirm "Disable Bluetooth?"; then
     disable_bluetooth=yes
 else
@@ -700,7 +736,7 @@ else
     disable_thunderbolt=no
 fi
 
-gum style --foreground 212 --bold --margin "1 0" "Hostname"
+show_section "Hostname"
 while true; do
     hostname=$(gum input --header "Enter hostname:" --placeholder "archlinux" --char-limit 63)
     [[ -n "$hostname" ]] || { show_error "You need to enter a hostname"; continue; }
@@ -708,7 +744,7 @@ while true; do
     break
 done
 
-gum style --foreground 212 --bold --margin "1 0" "Timezone"
+show_section "Timezone"
 tz_region=$(find /usr/share/zoneinfo -maxdepth 1 -type d \
     -not -name 'zoneinfo' -not -name 'posix' -not -name 'right' \
     -printf '%f\n' 2>/dev/null | sort | \
@@ -717,7 +753,7 @@ tz_city=$(find "/usr/share/zoneinfo/$tz_region" -type f -printf '%P\n' 2>/dev/nu
     gum filter --header "Select city:" --placeholder "Search city..." --height 15)
 timezone="$tz_region/$tz_city"
 
-gum style --foreground 212 --bold --margin "1 0" "User Account"
+show_section "User Account"
 while true; do
     username=$(gum input --header "Enter username:" --placeholder "user")
     [[ -n "$username" ]] || { show_error "You need to enter a username"; continue; }
@@ -733,7 +769,7 @@ while true; do
     break
 done
 
-gum style --foreground 212 --bold --margin "1 0" "Target Disk"
+show_section "Target Disk"
 devices=$(lsblk --nodeps --paths --list --noheadings --sort=size --output=name,size,type,model | awk '$3 == "disk"')
 if [[ -z "$devices" ]]; then
     show_error "No target disks found"
@@ -756,8 +792,8 @@ if gum confirm "Securely wipe $target_disk with blkdiscard before partitioning? 
     wipe_mode=discard
 fi
 
-gum style --foreground 212 --bold --margin "1 0" "Installation Summary"
-gum style --border rounded --border-foreground 212 --padding "1 2" --margin "0 2" \
+show_section "Installation Summary"
+gum style --border rounded --border-foreground "$UI_ACCENT" --padding "1 2" --margin "0 2" \
     "Target disk:     $target_disk" \
     "Secure wipe:     $wipe_mode" \
     "Unlock method:   $unlock_method_label" \
@@ -767,7 +803,9 @@ gum style --border rounded --border-foreground 212 --padding "1 2" --margin "0 2
     "Timezone:        $timezone" \
     "Username:        $username"
 
-if ! gum confirm "Proceed? This will destroy all data on $target_disk."; then
+show_action "DESTRUCTIVE OPERATION" \
+    "All data on $target_disk will be destroyed."
+if ! gum confirm "Erase $target_disk and begin installation?"; then
     show_info "Installation cancelled"
     exit 0
 fi
@@ -786,6 +824,7 @@ if [[ -e /dev/mapper/cryptroot ]]; then
     exit 1
 fi
 
+show_section "Disk Setup"
 if [[ "$wipe_mode" == "discard" ]]; then
     show_info "Discarding all blocks on $target_disk"
     wipefs --all "$target_disk"
@@ -842,6 +881,7 @@ install -d -m 0755 /mnt/efi
 mount -o fmask=0137,dmask=0027 "$efi_part" /mnt/efi
 
 detect_microcode
+show_section "Base System"
 show_info "Installing base system with pacstrap"
 pacstrap -K /mnt \
     base base-devel linux linux-headers "$microcode" linux-firmware
@@ -851,12 +891,15 @@ genfstab -U /mnt >/mnt/etc/fstab
 
 root_uuid=$(blkid -s UUID -o value "$root_part")
 
+show_section "Package Installation"
 install_selected_packages
 
+show_section "System Configuration"
 show_info "Configuring target system"
 configure_target
 unset userpass userpass2
 
+show_section "Finalizing Installation"
 if ! umount -R /mnt; then
     show_error "Failed to unmount /mnt cleanly. Close open files on it, then run: umount -R /mnt"
 fi
@@ -866,8 +909,8 @@ fi
 
 echo ""
 gum style \
-    --foreground 82 --border-foreground 82 --border double \
-    --align center --width 74 --margin "1 2" --padding "1 2" \
+    --foreground "$UI_SUCCESS" --border-foreground "$UI_SUCCESS" --border double \
+    --align center --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
     "Installation Complete" \
     "" \
     "Reboot into firmware and enable Secure Boot:" \
