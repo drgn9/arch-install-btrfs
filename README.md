@@ -173,27 +173,29 @@ mkfs.fat -F 32 -n EFI
 Btrfs subvolumes:
 
 ```text
-Subvolume     Mount
-@             /
-@snapshots    /.snapshots
-@home         /home
-@root         /root
-@var_log      /var/log
-@var_cache    /var/cache
-@var_tmp      /var/tmp
-@docker       /var/lib/docker
-@containerd   /var/lib/containerd
-@containers   /var/lib/containers
-@machines     /var/lib/machines
-@portables    /var/lib/portables
-@flatpak      /var/lib/flatpak
-@libvirt      /var/lib/libvirt
-@sbctl        /var/lib/sbctl
-@iwd          /var/lib/iwd
-@tailscale    /var/lib/tailscale
-@netbird      /var/lib/netbird
-@srv          /srv
+Subvolume     Mount                    Extra mount options
+@             /                        none
+@snapshots    /.snapshots              nodev,nosuid,noexec
+@home         /home                    nodev,nosuid
+@root         /root                    nodev,nosuid
+@var_log      /var/log                 nodev,nosuid,noexec
+@var_cache    /var/cache               nodev,nosuid,noexec
+@var_tmp      /var/tmp                 nodev,nosuid
+@docker       /var/lib/docker          none
+@containerd   /var/lib/containerd      none
+@containers   /var/lib/containers      none
+@machines     /var/lib/machines        none
+@portables    /var/lib/portables       none
+@flatpak      /var/lib/flatpak         none
+@libvirt      /var/lib/libvirt         none
+@sbctl        /var/lib/sbctl           nodev,nosuid,noexec
+@iwd          /var/lib/iwd             nodev,nosuid,noexec
+@tailscale    /var/lib/tailscale       nodev,nosuid,noexec
+@netbird      /var/lib/netbird         nodev,nosuid,noexec
+@srv          /srv                     nodev,nosuid
 ```
+
+All Btrfs mounts use `noatime,compress=zstd:3`. The ESP is mounted at `/efi` with `fmask=0137,dmask=0027,nodev,nosuid,noexec`. Container, VM, machine, portable service, and Flatpak storage keep the base Btrfs options only for runtime compatibility.
 
 Only `@` is managed by Snapper. `/var/lib/pacman` remains inside `@`, so package database changes are part of root rollback.
 

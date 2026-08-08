@@ -7,6 +7,8 @@
 set -Eeuo pipefail
 
 BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
+BTRFS_STRICT_MOUNT_OPTIONS="$BTRFS_MOUNT_OPTIONS,nodev,nosuid,noexec"
+EFI_MOUNT_OPTIONS="fmask=0137,dmask=0027,nodev,nosuid,noexec"
 
 opened_luks=no
 mounted=no
@@ -140,14 +142,14 @@ mount_installed_system() {
     chmod 1777 /mnt/var/tmp
 
     if [[ -d /mnt/efi ]]; then
-        mount -o fmask=0137,dmask=0027 "$efi_part" /mnt/efi
+        mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" /mnt/efi
     else
         show_warn '/mnt/efi does not exist; the ESP was not mounted.'
     fi
 
     # @sbctl holds the Secure Boot keys; without it no UKI can be signed.
     install -d -m 0755 /mnt/var/lib/sbctl
-    if ! mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@sbctl" "$root_device" /mnt/var/lib/sbctl; then
+    if ! mount -o "$BTRFS_STRICT_MOUNT_OPTIONS,subvol=@sbctl" "$root_device" /mnt/var/lib/sbctl; then
         show_warn 'Could not mount @sbctl; UKI signing will be unavailable.'
     fi
 }

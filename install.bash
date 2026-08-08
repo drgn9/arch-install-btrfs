@@ -8,6 +8,9 @@ SETTINGS_DIR="$SCRIPT_DIR/settings"
 RESCUE_UKI_SOURCE="$SCRIPT_DIR/artifacts/arch-rescue.efi"
 RESCUE_UKI_TARGET=/efi/EFI/Linux/arch-rescue.efi
 BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
+BTRFS_DATA_MOUNT_OPTIONS="$BTRFS_MOUNT_OPTIONS,nodev,nosuid"
+BTRFS_STRICT_MOUNT_OPTIONS="$BTRFS_DATA_MOUNT_OPTIONS,noexec"
+EFI_MOUNT_OPTIONS="fmask=0137,dmask=0027,nodev,nosuid,noexec"
 BTRFS_SUBVOLUMES=(
     @
     @snapshots
@@ -319,7 +322,7 @@ setup_snapper_rollback() {
     target_chroot btrfs subvolume delete /.snapshots
 
     install -d -m 0750 /mnt/.snapshots
-    mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@snapshots" "$root_device" /mnt/.snapshots
+    mount -o "$(btrfs_mount_options_for /.snapshots),subvol=@snapshots" "$root_device" /mnt/.snapshots
     chmod 0750 /mnt/.snapshots
 
     target_chroot snapper --no-dbus -c root set-config \
@@ -398,6 +401,22 @@ append_unique_lines() {
         [[ -n "$line" ]] || continue
         grep -qxF "$line" "/mnt$target" || printf '%s\n' "$line" >>"/mnt$target"
     done <"$source"
+}
+
+btrfs_mount_options_for() {
+    local mountpoint=$1
+
+    case "$mountpoint" in
+        /.snapshots|/var/log|/var/cache|/var/lib/sbctl|/var/lib/iwd|/var/lib/tailscale|/var/lib/netbird)
+            printf '%s\n' "$BTRFS_STRICT_MOUNT_OPTIONS"
+            ;;
+        /home|/root|/var/tmp|/srv)
+            printf '%s\n' "$BTRFS_DATA_MOUNT_OPTIONS"
+            ;;
+        *)
+            printf '%s\n' "$BTRFS_MOUNT_OPTIONS"
+            ;;
+    esac
 }
 
 delete_boot_entries_by_label() {
@@ -852,13 +871,14 @@ mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
 for subvolume_mount in "${BTRFS_SUBVOLUME_MOUNTS[@]}"; do
     subvolume=${subvolume_mount%%:*}
     mountpoint=${subvolume_mount#*:}
+    mount_options=$(btrfs_mount_options_for "$mountpoint")
     install -d -m 0755 "/mnt$mountpoint"
-    mount -o "$BTRFS_MOUNT_OPTIONS,subvol=$subvolume" "$root_device" "/mnt$mountpoint"
+    mount -o "$mount_options,subvol=$subvolume" "$root_device" "/mnt$mountpoint"
 done
 chmod 0700 /mnt/root
 chmod 1777 /mnt/var/tmp
 install -d -m 0755 /mnt/efi
-mount -o fmask=0137,dmask=0027 "$efi_part" /mnt/efi
+mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" /mnt/efi
 
 detect_microcode
 show_section "Base System"
