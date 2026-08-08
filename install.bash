@@ -501,6 +501,7 @@ EOF
     copy_settings_file security /etc/modprobe.d/disable-intel-mei.conf
     copy_settings_file hardware /etc/modprobe.d/iwlwifi.conf
     copy_settings_file security /etc/modprobe.d/security-blacklist.conf
+    copy_settings_file security /etc/audit/auditd.conf
     copy_settings_file security /etc/audit/rules.d/10-arch-base.rules
     copy_settings_file security /etc/systemd/system.conf.d/60-disable-coredump.conf
     copy_settings_file security /etc/systemd/user.conf.d/60-disable-coredump.conf
@@ -508,11 +509,9 @@ EOF
     copy_settings_file access /etc/polkit-1/rules.d/00-udisks-wheel.rules
 
     install -d -m 0755 /mnt/etc/apparmor/earlypolicy
-    install -d -m 0755 /mnt/etc/apparmor.d/tunables/xdg-user-dirs.d/apparmor.d.d
     install -d -m 0755 /mnt/etc/apparmor.d/local
     touch /mnt/etc/apparmor/parser.conf
     append_settings_file security /etc/apparmor/parser.conf
-    copy_settings_file security /etc/apparmor.d/tunables/xdg-user-dirs.d/apparmor.d.d/local
     enable_target_service apparmor.service
     enable_target_service auditd.service
 

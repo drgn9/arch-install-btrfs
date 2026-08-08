@@ -1,45 +1,53 @@
-# Minimal audit rules for high-value security events.
-# Apply with: augenrules --load
+# Minimal Arch Linux audit policy focused on:
+#   - persistent system modification
+#   - package database changes
+#   - Secure Boot / UKI boot artifact changes
+#   - privileged execution
+#   - kernel module changes
+#   - filesystem mount changes
+#   - system/network identity changes
+#
+# -e 2 makes the loaded audit configuration immutable until reboot.
 
-# Buffer and failure mode
+-D
 -b 8192
 -f 1
 
-# Identity and authentication changes
--w /etc/passwd -p wa -k identity
--w /etc/shadow -p wa -k identity
--w /etc/group -p wa -k identity
--w /etc/gshadow -p wa -k identity
--w /etc/sudoers -p wa -k identity
--w /etc/sudoers.d/ -p wa -k identity
+# Persistent system files.
+-a always,exit -F arch=b64 -F dir=/usr/ -F perm=wa -F key=system_files
+-a always,exit -F arch=b32 -F dir=/usr/ -F perm=wa -F key=system_files
 
-# Privilege escalation
--w /bin/su -p x -k privileged
--w /usr/bin/sudo -p x -k privileged
--w /usr/bin/newgrp -p x -k privileged
--a always,exit -F arch=b64 -S setuid -S setgid -S setreuid -S setregid -k privilege_escalation
--a always,exit -F arch=b64 -S execve -F euid=0 -F auid>=1000 -F auid!=4294967295 -k privilege_escalation
+# Persistent system configuration.
+-a always,exit -F arch=b64 -F dir=/etc/ -F perm=wa -F key=system_config
+-a always,exit -F arch=b32 -F dir=/etc/ -F perm=wa -F key=system_config
 
-# Filesystem mount events
--a always,exit -F arch=b64 -S mount -k mounts
--a always,exit -F arch=b32 -S mount -k mounts
+# Pacman installed-package metadata.
+-a always,exit -F arch=b64 -F dir=/var/lib/pacman/local/ -F perm=wa -F key=pacman_db
+-a always,exit -F arch=b32 -F dir=/var/lib/pacman/local/ -F perm=wa -F key=pacman_db
 
-# File deletion by users
--a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
--a always,exit -F arch=b32 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
+# EFI System Partition: systemd-boot, loader config, signed UKIs.
+-a always,exit -F arch=b64 -F dir=/efi/ -F perm=wa -F key=boot_files
+-a always,exit -F arch=b32 -F dir=/efi/ -F perm=wa -F key=boot_files
 
-# Kernel module loading/unloading
--w /sbin/insmod -p x -k modules
--w /sbin/rmmod -p x -k modules
--w /sbin/modprobe -p x -k modules
--a always,exit -F arch=b64 -S init_module -S finit_module -S delete_module -k modules
+# Privileged commands run from normal user login sessions.
+-a always,exit -F arch=b64 -S execve,execveat -F euid=0 -F auid>=1000 -F auid!=unset -F key=privileged_exec
+-a always,exit -F arch=b32 -S execve,execveat -F euid=0 -F auid>=1000 -F auid!=unset -F key=privileged_exec
 
-# System time changes
--a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
--a always,exit -F arch=b32 -S adjtimex -S settimeofday -k time-change
--w /etc/localtime -p wa -k time-change
+# Kernel module loading/unloading.
+-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -F key=modules
+-a always,exit -F arch=b32 -S init_module,finit_module,delete_module -F key=modules
 
-# Network identity changes
--a always,exit -F arch=b64 -S sethostname -S setdomainname -k system-locale
--w /etc/hosts -p wa -k system-locale
--w /etc/hostname -p wa -k system-locale
+# Filesystem mount operations.
+-a always,exit -F arch=b64 -S mount,umount2,move_mount,mount_setattr -F key=mounts
+-a always,exit -F arch=b32 -S mount,umount2,move_mount,mount_setattr -F key=mounts
+
+# System clock changes.
+-a always,exit -F arch=b64 -S adjtimex,settimeofday -F key=time_change
+-a always,exit -F arch=b32 -S adjtimex,settimeofday -F key=time_change
+
+# Runtime hostname/domain changes.
+-a always,exit -F arch=b64 -S sethostname,setdomainname -F key=network_identity
+-a always,exit -F arch=b32 -S sethostname,setdomainname -F key=network_identity
+
+# Make audit policy immutable until reboot.
+-e 2
