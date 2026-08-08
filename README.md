@@ -365,6 +365,7 @@ The custom ISO also provides:
 
 ```bash
 rescue-root
+trusted-paccheck
 ```
 
 `rescue-root` is a guided Bash command with two actions:
@@ -382,6 +383,29 @@ partition 2 -> root, either Btrfs or LUKS+Btrfs
 ```
 
 It refuses to continue if `/mnt` is already mounted or `/dev/mapper/cryptroot` already exists, because that usually means a previous rescue attempt was not cleaned up.
+
+### Check Package Integrity
+
+Use `trusted-paccheck` when you want to verify installed official Arch package files from rescue without trusting the installed system's own pacman metadata.
+
+It requires the installed root to be mounted read-only at `/mnt`:
+
+```bash
+mount -o ro,noatime,compress=zstd:3,subvol=@ ROOT_DEVICE /mnt
+trusted-paccheck
+```
+
+For LUKS systems, unlock first and use `/dev/mapper/cryptroot` as `ROOT_DEVICE`.
+
+`trusted-paccheck` downloads the exact installed package versions from the Arch Linux Archive, verifies detached package signatures with the rescue keyring, reconstructs a trusted pacman database in `/run`, and runs `paccheck` against `/mnt`.
+
+By default it fails before checking if any installed package cannot be retrieved as a signed official Arch package. This catches AUR/custom packages instead of silently omitting them. To check official packages and explicitly report skipped foreign/custom packages, run:
+
+```bash
+trusted-paccheck --official-only
+```
+
+It checks official pacman-owned package files only. It does not verify AUR packages, custom files from this installer, user data, `/efi` UKIs, or extra files dropped outside package ownership.
 
 ### Choose Manual Repair
 
@@ -506,6 +530,7 @@ iso/out/                                          generated ISO output, gitignor
 artifacts/arch-rescue.efi                         generated rescue UKI intermediate, removed after successful ISO build
 iso/airootfs/usr/local/bin/install-arch           live ISO installer launcher
 iso/airootfs/usr/local/bin/rescue-root            live ISO rescue launcher
+iso/airootfs/usr/local/bin/trusted-paccheck       live/rescue package integrity checker
 settings/rollback/usr/local/sbin/rollback-root    installed rollback helper
 rescue-uki/                                       mkosi rescue UKI definition
 ```

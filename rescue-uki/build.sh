@@ -9,6 +9,8 @@ ARTIFACT="$ARTIFACT_DIR/arch-rescue.efi"
 ROOTPW_FILE="$SCRIPT_DIR/mkosi.rootpw"
 RESCUE_SOURCE="$REPO_DIR/iso/airootfs/usr/local/bin/rescue-root"
 RESCUE_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/bin/rescue-root"
+TRUSTED_PACCHECK_SOURCE="$REPO_DIR/iso/airootfs/usr/local/bin/trusted-paccheck"
+TRUSTED_PACCHECK_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/bin/trusted-paccheck"
 
 # The rescue image is built with a pinned mkosi version so builds do not
 # silently change behavior when the build machine upgrades its mkosi package.
@@ -19,6 +21,7 @@ MKOSI_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/arch-new-install/mkosi/v$MKOSI_VERSI
 cleanup() {
     rm -f "$ROOTPW_FILE"
     rm -f "$RESCUE_OVERLAY"
+    rm -f "$TRUSTED_PACCHECK_OVERLAY"
 }
 trap cleanup EXIT
 
@@ -29,6 +32,11 @@ fi
 
 if [[ ! -f "$RESCUE_SOURCE" ]]; then
     echo "ERROR: Missing rescue script: $RESCUE_SOURCE" >&2
+    exit 1
+fi
+
+if [[ ! -f "$TRUSTED_PACCHECK_SOURCE" ]]; then
+    echo "ERROR: Missing trusted paccheck script: $TRUSTED_PACCHECK_SOURCE" >&2
     exit 1
 fi
 
@@ -77,6 +85,7 @@ chmod 0600 "$ROOTPW_FILE"
 unset hashed_password
 
 install -D -m 0755 "$RESCUE_SOURCE" "$RESCUE_OVERLAY"
+install -D -m 0755 "$TRUSTED_PACCHECK_SOURCE" "$TRUSTED_PACCHECK_OVERLAY"
 
 rm -rf "$SCRIPT_DIR/mkosi.output"
 rm -f "$ARTIFACT"

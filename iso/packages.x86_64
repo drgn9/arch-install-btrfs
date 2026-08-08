@@ -1,7 +1,9 @@
 git
+curl
 gum
 impala
 btrfs-progs
 iptables
 snapper
 rsync
+pacutils

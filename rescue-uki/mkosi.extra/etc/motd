@@ -1,4 +1,5 @@
 Arch Rescue
 
 Guided recovery: rescue-root
+Package check:   trusted-paccheck
 Wi-Fi:          impala

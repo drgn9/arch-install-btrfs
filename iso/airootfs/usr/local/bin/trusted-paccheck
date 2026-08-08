@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+TARGET=/mnt
+ALA=https://archive.archlinux.org/packages
+STRICT=yes
+
+usage() {
+    cat <<'EOF'
+Usage: trusted-paccheck [--target PATH] [--official-only]
+
+Build a trusted pacman database from signed Arch Linux Archive packages, then
+run paccheck against a read-only mounted Arch installation.
+
+Options:
+  --target PATH     Mounted installed system root. Default: /mnt
+  --official-only   Check official packages and report skipped foreign/custom
+                    packages instead of failing before the check.
+EOF
+}
+
+die() {
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+while (($#)); do
+    case "$1" in
+        --target)
+            (($# >= 2)) || die '--target requires a path'
+            TARGET=$2
+            shift 2
+            ;;
+        --official-only)
+            STRICT=no
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            die "Unknown argument: $1"
+            ;;
+    esac
+done
+
+[[ ${EUID:-0} -eq 0 ]] || die 'Run this script as root.'
+
+for cmd in mountpoint findmnt pacman pacman-key paccheck curl mktemp wc; do
+    command -v "$cmd" >/dev/null || die "Required command not found: $cmd"
+done
+
+mountpoint -q "$TARGET" || die "$TARGET is not mounted."
+
+mount_opts=$(findmnt -n -o OPTIONS --target "$TARGET")
+if [[ ",$mount_opts," != *,ro,* ]]; then
+    die "$TARGET is not mounted read-only."
+fi
+
+[[ -d "$TARGET/var/lib/pacman/local" ]] || die "$TARGET/var/lib/pacman/local does not exist."
+
+pacman-key --list-keys >/dev/null 2>&1 || die 'The rescue environment does not have a usable pacman keyring.'
+curl --globoff --fail --silent --head --location "$ALA/" >/dev/null || die 'Cannot reach the Arch Linux Archive.'
+
+WORK=$(mktemp -d /run/trusted-paccheck.XXXXXX)
+PKGDIR=$WORK/packages
+DB=$WORK/pacman
+HOOKDIR=$WORK/hooks
+ROOTDIR=$WORK/root
+INVENTORY=$WORK/inventory
+
+trap 'rm -rf "$WORK"' EXIT
+
+mkdir -p "$PKGDIR" "$DB/local" "$HOOKDIR" "$ROOTDIR"
+
+printf 'Reading installed package inventory from %s...\n' "$TARGET"
+
+# The target database is trusted only for package names and versions. Package
+# metadata used for verification is reconstructed from signed archive packages.
+LC_ALL=C pacman --dbpath "$TARGET/var/lib/pacman" -Q >"$INVENTORY"
+[[ -s "$INVENTORY" ]] || die 'Installed package inventory is empty.'
+
+package_count=$(wc -l <"$INVENTORY")
+package_count=${package_count//[[:space:]]/}
+
+printf 'Found %s installed packages.\n\n' "$package_count"
+printf 'Downloading, verifying, and importing exact Arch packages...\n'
+
+declare -a MISSING_PACKAGES=()
+declare -a SKIPPED_PACKAGES=()
+
+import_package() {
+    local package_file=$1
+
+    pacman \
+        -U \
+        --dbonly \
+        --nodeps \
+        --nodeps \
+        --noscriptlet \
+        --noconfirm \
+        --dbpath "$DB" \
+        --hookdir "$HOOKDIR" \
+        --root "$ROOTDIR" \
+        --logfile "$WORK/pacman.log" \
+        "$package_file" >/dev/null
+}
+
+download_verify_import_package() {
+    local pkg=$1
+    local version=$2
+    local file_version=${version#*:}
+    local first=${pkg:0:1}
+    local arch ext filename url outfile
+
+    for arch in x86_64 any; do
+        for ext in zst xz gz; do
+            filename="${pkg}-${file_version}-${arch}.pkg.tar.${ext}"
+            url="${ALA}/${first}/${pkg}/${filename}"
+            outfile="${PKGDIR}/${filename}"
+
+            if ! curl \
+                --globoff \
+                --fail \
+                --location \
+                --silent \
+                --retry 3 \
+                --retry-all-errors \
+                --output "${outfile}.tmp" \
+                "$url"
+            then
+                rm -f "${outfile}.tmp"
+                continue
+            fi
+
+            mv "${outfile}.tmp" "$outfile"
+
+            if ! curl \
+                --globoff \
+                --fail \
+                --location \
+                --silent \
+                --retry 3 \
+                --retry-all-errors \
+                --output "${outfile}.sig" \
+                "${url}.sig"
+            then
+                die "Package found but signature missing: $filename"
+            fi
+
+            if ! pacman-key --verify "${outfile}.sig" "$outfile" >/dev/null 2>&1; then
+                printf '\nSignature verification FAILED:\n  %s\n\n' "$filename"
+                pacman-key --verify "${outfile}.sig" "$outfile" || true
+                exit 1
+            fi
+
+            import_package "$outfile"
+            rm -f "$outfile" "${outfile}.sig"
+
+            printf '  verified: %s %s\n' "$pkg" "$version"
+            return 0
+        done
+    done
+
+    return 1
+}
+
+while IFS=' ' read -r pkg version; do
+    [[ -n "$pkg" && -n "$version" ]] || die 'Malformed package inventory entry.'
+    [[ "$pkg" =~ ^[a-z0-9@._+:-]+$ ]] || die "Invalid package name in installed database: $pkg"
+    [[ "$version" != *"/"* && "$version" != *$'\n'* ]] || die "Invalid version in installed database: $pkg $version"
+
+    if ! download_verify_import_package "$pkg" "$version"; then
+        if [[ "$STRICT" == yes ]]; then
+            MISSING_PACKAGES+=("$pkg $version")
+        else
+            SKIPPED_PACKAGES+=("$pkg $version")
+            printf '  skipped:  %s %s\n' "$pkg" "$version"
+        fi
+    fi
+done <"$INVENTORY"
+
+if (( ${#MISSING_PACKAGES[@]} > 0 )); then
+    printf '\nERROR: The following installed packages could not be retrieved as signed official Arch packages:\n\n'
+    printf '  %s\n' "${MISSING_PACKAGES[@]}"
+    printf '\nNo integrity check was performed.\n'
+    printf '\nThese may be AUR/custom packages, or versions unavailable from the Arch Linux Archive.\n'
+    printf 'Re-run with --official-only to check official packages and report skipped packages.\n'
+    exit 1
+fi
+
+trusted_count=$(pacman --dbpath "$DB" -Q | wc -l)
+trusted_count=${trusted_count//[[:space:]]/}
+expected_count=$package_count
+if [[ "$STRICT" == no ]]; then
+    expected_count=$((package_count - ${#SKIPPED_PACKAGES[@]}))
+fi
+
+[[ "$trusted_count" -eq "$expected_count" ]] || die "Trusted DB contains $trusted_count packages; expected $expected_count."
+
+printf '\nTrusted database contains %s verified packages.\n' "$trusted_count"
+
+if (( ${#SKIPPED_PACKAGES[@]} > 0 )); then
+    printf '\nSkipped foreign/custom packages:\n\n'
+    printf '  %s\n' "${SKIPPED_PACKAGES[@]}"
+fi
+
+printf '\nRunning paccheck against %s...\n\n' "$TARGET"
+
+set +e
+paccheck \
+    --root="$TARGET" \
+    --dbpath="$DB" \
+    --files \
+    --file-properties \
+    --sha256sum \
+    --db-files \
+    --require-mtree \
+    --quiet \
+    <&-
+result=$?
+set -e
+
+printf '\n'
+if [[ $result -eq 0 ]]; then
+    printf 'PASS: paccheck found no package integrity problems.\n'
+else
+    printf 'FAIL: paccheck found package integrity problems.\n'
+fi
+
+exit "$result"
