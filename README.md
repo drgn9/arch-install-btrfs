@@ -487,14 +487,15 @@ Root replacement does this:
 5. List snapshots from `@snapshots`.
 6. Ask which snapshot should become the new `@`.
 7. Create a temporary replacement root named `@new-rollback-<timestamp>`.
-8. Move the current `@` to `@old-<timestamp>`.
-9. Move the temporary replacement into place as the new `@`.
-10. Set the Btrfs default subvolume to the new `@`.
-11. Unmount the top-level volume and mount the restored `@` at `/mnt`.
-12. Rebuild UKIs with `mkinitcpio -P`.
-13. Require the `sbctl` keys, then sign and verify UKIs.
-14. Unmount everything and close LUKS if it was opened.
-15. Offer to reboot.
+8. Mount the ESP and `@sbctl` inside the temporary replacement.
+9. Back up the current UKIs, rebuild with `mkinitcpio -P`, then sign and verify them from the temporary replacement.
+10. Move the current `@` to `@old-<timestamp>` only after boot preparation succeeds.
+11. Move the temporary replacement into place as the new `@`.
+12. Set and verify the Btrfs default subvolume by ID.
+13. Unmount everything and close LUKS if it was opened.
+14. Offer to reboot.
+
+If root promotion fails, `rescue-root` verifies subvolume identities before restoring the original `@`, original default subvolume, and backed-up UKIs. The failed candidate may be retained as `@new-rollback-<timestamp>` or `@failed-<timestamp>` for inspection. Delete it only after the original system is verified. If automatic restoration cannot complete, the command prints `DO NOT REBOOT` with the original and replacement subvolume IDs and the UKI backup location for manual recovery.
 
 The old root is intentionally kept:
 

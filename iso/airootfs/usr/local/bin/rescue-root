@@ -14,6 +14,7 @@ opened_luks=no
 mounted=no
 top_mounted=no
 cleanup_enabled=yes
+temporary_esp_mount=
 UI_ACCENT=212
 UI_ACTION=214
 UI_SUCCESS=82
@@ -71,6 +72,12 @@ cleanup_on_failure() {
     (( status != 0 )) || return 0
     [[ "$cleanup_enabled" == yes ]] || return 0
 
+    if [[ -n "$temporary_esp_mount" ]]; then
+        umount "$temporary_esp_mount" 2>/dev/null || true
+        if ! findmnt -rn -M "$temporary_esp_mount" >/dev/null 2>&1; then
+            rmdir "$temporary_esp_mount" 2>/dev/null || true
+        fi
+    fi
     if [[ "$mounted" == yes || "$top_mounted" == yes ]]; then
         umount -R /mnt 2>/dev/null || true
     fi
@@ -194,33 +201,122 @@ list_snapshots() {
     done | sort -n
 }
 
-sign_and_verify_ukis() {
-    arch-chroot /mnt bash -lc 'command -v sbctl >/dev/null 2>&1 && [[ -d /var/lib/sbctl/keys ]]' || \
-        die 'sbctl or its Secure Boot keys are unavailable; refusing to leave rebuilt UKIs unsigned.'
+subvolume_id() {
+    btrfs inspect-internal rootid "$1"
+}
 
-    arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-linux.efi
-    if [[ -f /mnt/efi/EFI/Linux/arch-rescue.efi ]]; then
-        arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-rescue.efi
+default_subvolume_id() {
+    btrfs subvolume get-default "$1" | awk '$1 == "ID" { print $2; exit }'
+}
+
+sign_and_verify_ukis() {
+    local root=$1
+
+    arch-chroot "$root" bash -lc 'command -v sbctl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && [[ -d /var/lib/sbctl/keys ]]' || return 1
+    arch-chroot "$root" sbctl sign -s /efi/EFI/Linux/arch-linux.efi || return 1
+    verify_signed_file "$root" /efi/EFI/Linux/arch-linux.efi || return 1
+    if [[ -f "$root/efi/EFI/Linux/arch-rescue.efi" ]]; then
+        arch-chroot "$root" sbctl sign -s /efi/EFI/Linux/arch-rescue.efi || return 1
+        verify_signed_file "$root" /efi/EFI/Linux/arch-rescue.efi || return 1
     fi
-    if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
-        arch-chroot /mnt sbctl sign -s -o /usr/lib/fwupd/efi/fwupdx64.efi.signed /usr/lib/fwupd/efi/fwupdx64.efi
+    if [[ -f "$root/usr/lib/fwupd/efi/fwupdx64.efi" ]]; then
+        arch-chroot "$root" sbctl sign -s -o /usr/lib/fwupd/efi/fwupdx64.efi.signed /usr/lib/fwupd/efi/fwupdx64.efi || return 1
+        verify_signed_file "$root" /usr/lib/fwupd/efi/fwupdx64.efi.signed || return 1
     fi
-    arch-chroot /mnt sbctl verify
+}
+
+verify_signed_file() {
+    local root=$1 file=$2 verification
+
+    verification=$(arch-chroot "$root" sbctl --json verify "$file") || return 1
+    arch-chroot "$root" jq -e 'length == 1 and .[0].is_signed == 1' <<<"$verification" >/dev/null
+}
+
+backup_boot_artifacts() {
+    local esp=$1 backup_dir=$2
+
+    [[ -s "$esp/EFI/Linux/arch-linux.efi" ]] || return 1
+    install -m 0600 "$esp/EFI/Linux/arch-linux.efi" "$backup_dir/arch-linux.efi" || return 1
+    if [[ -f "$esp/EFI/Linux/arch-rescue.efi" ]]; then
+        install -m 0600 "$esp/EFI/Linux/arch-rescue.efi" "$backup_dir/arch-rescue.efi" || return 1
+    fi
+}
+
+restore_boot_artifacts() {
+    local esp=$1 backup_dir=$2
+
+    install -m 0644 "$backup_dir/arch-linux.efi" "$esp/EFI/Linux/arch-linux.efi" || return 1
+    sync -f "$esp/EFI/Linux/arch-linux.efi" || return 1
+    if [[ -f "$backup_dir/arch-rescue.efi" ]]; then
+        install -m 0644 "$backup_dir/arch-rescue.efi" "$esp/EFI/Linux/arch-rescue.efi" || return 1
+        sync -f "$esp/EFI/Linux/arch-rescue.efi" || return 1
+    fi
+}
+
+restore_boot_artifacts_from_device() {
+    local backup_dir=$1
+    local status=0
+
+    temporary_esp_mount=$(mktemp -d /run/arch-rescue-esp.XXXXXX) || return 1
+    if ! mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" "$temporary_esp_mount"; then
+        rmdir "$temporary_esp_mount"
+        temporary_esp_mount=
+        return 1
+    fi
+    restore_boot_artifacts "$temporary_esp_mount" "$backup_dir" || status=1
+    if umount "$temporary_esp_mount"; then
+        rmdir "$temporary_esp_mount" || status=1
+        temporary_esp_mount=
+    else
+        status=1
+    fi
+    return "$status"
+}
+
+remove_boot_backup() {
+    local backup_dir=$1
+
+    rm -f "$backup_dir/arch-linux.efi" "$backup_dir/arch-rescue.efi"
+    rmdir "$backup_dir"
+}
+
+rollback_promotion() {
+    local old_root=$1 new_root=$2 failed_root=$3
+    local old_root_id=$4 new_root_id=$5 original_default_id=$6 backup_dir=$7
+    local current_root_id
+
+    current_root_id=$(subvolume_id /mnt/@ 2>/dev/null || true)
+    if [[ "$current_root_id" == "$new_root_id" ]]; then
+        mv -T -- /mnt/@ "/mnt/$failed_root" || return 1
+        current_root_id=
+    elif [[ -n "$current_root_id" && "$current_root_id" != "$old_root_id" ]]; then
+        return 1
+    elif [[ -z "$current_root_id" && -e /mnt/@ ]]; then
+        return 1
+    fi
+
+    if [[ -z "$current_root_id" ]]; then
+        [[ ! -e /mnt/@ ]] || return 1
+        [[ "$(subvolume_id "/mnt/$old_root" 2>/dev/null || true)" == "$old_root_id" ]] || return 1
+        mv -T -- "/mnt/$old_root" /mnt/@ || return 1
+    fi
+
+    btrfs subvolume set-default "$original_default_id" /mnt || return 1
+    [[ "$(subvolume_id /mnt/@ 2>/dev/null || true)" == "$old_root_id" ]] || return 1
+    [[ "$(default_subvolume_id /mnt 2>/dev/null || true)" == "$original_default_id" ]] || return 1
+    restore_boot_artifacts_from_device "$backup_dir"
 }
 
 replace_root_from_snapshot() {
-    local snapshots selection snapshot old_root new_root timestamp
+    local snapshots selection snapshot old_root new_root failed_root timestamp
+    local old_root_id new_root_id original_default_id candidate backup_dir
+    local promotion_error
 
     select_target
 
 
     mount -o "$BTRFS_MOUNT_OPTIONS,subvolid=5" "$root_device" /mnt
     top_mounted=yes
-
-    # Refuse to continue before any subvolume mutation if the Secure Boot
-    # keys are missing; the rebuilt arch-linux.efi must be signed afterwards
-    # or the system will not boot.
-    [[ -d /mnt/@sbctl/keys ]] || die 'sbctl keys not found at @sbctl/keys; refusing to replace @ because the rebuilt UKI could not be signed.'
 
     show_section "Choose Snapshot"
     snapshots=$(list_snapshots)
@@ -238,32 +334,84 @@ replace_root_from_snapshot() {
     timestamp=$(date +%Y%m%d-%H%M%S)
     old_root="@old-$timestamp"
     new_root="@new-rollback-$timestamp"
+    failed_root="@failed-$timestamp"
     [[ -d /mnt/@ ]] || die 'Current root subvolume @ was not found.'
-    [[ ! -e "/mnt/$old_root" && ! -e "/mnt/$new_root" ]] || die 'Temporary rollback subvolume name already exists.'
+    [[ ! -e "/mnt/$old_root" && ! -e "/mnt/$new_root" && ! -e "/mnt/$failed_root" ]] || die 'Temporary rollback subvolume name already exists.'
+
+    old_root_id=$(subvolume_id /mnt/@)
+    original_default_id=$(default_subvolume_id /mnt)
+    [[ "$old_root_id" =~ ^[0-9]+$ && "$original_default_id" =~ ^[0-9]+$ ]] || die 'Could not identify the current root and default subvolumes.'
 
     show_section "Restoring Root"
     show_info "Creating replacement from snapshot $snapshot"
     btrfs subvolume snapshot "/mnt/@snapshots/$snapshot/snapshot" "/mnt/$new_root"
     [[ -d "/mnt/$new_root" ]] || die 'Replacement root subvolume was not created.'
+    candidate="/mnt/$new_root"
+    new_root_id=$(subvolume_id "$candidate")
+    [[ "$new_root_id" =~ ^[0-9]+$ ]] || die 'Could not identify the replacement root subvolume.'
+
+    [[ -d "$candidate/efi" && -d "$candidate/var/lib/sbctl" ]] || die 'Replacement root is missing required ESP or sbctl mount points.'
+    arch-chroot "$candidate" bash -lc 'command -v mkinitcpio >/dev/null 2>&1 && command -v sbctl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1' || \
+        die 'Replacement root does not contain mkinitcpio, sbctl, and jq.'
+
+    mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" "$candidate/efi"
+    mount -o "$BTRFS_STRICT_MOUNT_OPTIONS,subvol=@sbctl" "$root_device" "$candidate/var/lib/sbctl"
+    [[ -d "$candidate/var/lib/sbctl/keys" ]] || die 'Secure Boot keys are unavailable in @sbctl.'
+
+    backup_dir=$(mktemp -d /run/arch-rescue-uki.XXXXXX)
+    backup_boot_artifacts "$candidate/efi" "$backup_dir" || die 'Could not back up the current UKIs before rebuilding them.'
 
     trap '' INT TERM
-    mv /mnt/@ "/mnt/$old_root"
-    if ! mv "/mnt/$new_root" /mnt/@; then
-        mv "/mnt/$old_root" /mnt/@ 2>/dev/null || true
-        die 'Failed to promote replacement root subvolume; original @ was restored if possible.'
+    show_info 'Rebuilding and signing UKIs before root promotion'
+    if ! arch-chroot "$candidate" mkinitcpio -P || ! sign_and_verify_ukis "$candidate"; then
+        if restore_boot_artifacts "$candidate/efi" "$backup_dir"; then
+            remove_boot_backup "$backup_dir"
+            die 'Could not prepare boot artifacts for the replacement root; the current UKIs were restored.'
+        fi
+        die "Could not prepare or restore boot artifacts. DO NOT REBOOT. UKI backups remain at $backup_dir."
+    fi
+
+    if ! umount "$candidate/var/lib/sbctl"; then
+        restore_boot_artifacts "$candidate/efi" "$backup_dir" || \
+            die "Could not unmount @sbctl or restore the current UKIs. DO NOT REBOOT. UKI backups remain at $backup_dir."
+        remove_boot_backup "$backup_dir"
+        die 'Could not unmount @sbctl; the current UKIs were restored.'
+    fi
+    if ! umount "$candidate/efi"; then
+        if findmnt -rn -M "$candidate/efi" >/dev/null 2>&1; then
+            restore_boot_artifacts "$candidate/efi" "$backup_dir" || \
+                die "Could not unmount the ESP or restore the current UKIs. DO NOT REBOOT. UKI backups remain at $backup_dir."
+        elif ! restore_boot_artifacts_from_device "$backup_dir"; then
+            die "Could not verify the ESP unmount or restore the current UKIs. DO NOT REBOOT. UKI backups remain at $backup_dir."
+        fi
+        remove_boot_backup "$backup_dir"
+        die 'Could not unmount the ESP; the current UKIs were restored.'
+    fi
+
+    promotion_error=
+    if ! mv -T -- /mnt/@ "/mnt/$old_root"; then
+        promotion_error='Could not retain the current root.'
+    elif ! mv -T -- "/mnt/$new_root" /mnt/@; then
+        promotion_error='Could not promote the replacement root.'
+    elif ! btrfs subvolume set-default "$new_root_id" /mnt; then
+        promotion_error='Could not set the replacement root as the default subvolume.'
+    elif [[ "$(default_subvolume_id /mnt 2>/dev/null || true)" != "$new_root_id" ]]; then
+        promotion_error='The replacement root was not confirmed as the default subvolume.'
+    fi
+
+    if [[ -n "$promotion_error" ]]; then
+        if rollback_promotion "$old_root" "$new_root" "$failed_root" \
+            "$old_root_id" "$new_root_id" "$original_default_id" "$backup_dir"; then
+            remove_boot_backup "$backup_dir"
+            die "$promotion_error The original root, default subvolume, and UKIs were restored."
+        fi
+        die "$promotion_error Automatic restoration failed. DO NOT REBOOT. Original root ID: $old_root_id; replacement root ID: $new_root_id; UKI backups: $backup_dir"
     fi
     trap 'exit 130' INT TERM
-    btrfs subvolume set-default /mnt/@
+    remove_boot_backup "$backup_dir"
 
     umount -R /mnt
     top_mounted=no
-
-    mount_installed_system
-    arch-chroot /mnt mkinitcpio -P
-    sign_and_verify_ukis
-
-    umount -R /mnt
-    mounted=no
 
     if [[ "$opened_luks" == yes ]]; then
         cryptsetup close cryptroot
