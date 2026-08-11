@@ -827,8 +827,6 @@ show_section "Disk Setup"
 if [[ "$wipe_mode" == "discard" ]]; then
     show_info "Discarding all blocks on $target_disk"
     blkdiscard -f "$target_disk"
-    partprobe "$target_disk" || true
-    udevadm settle || true
 fi
 
 show_info "Creating declarative full-disk GPT layout with sfdisk"
@@ -837,8 +835,8 @@ label: gpt
 size=2GiB, type=uefi, name=ESP
 type=linux, name=ROOT
 EOF
-partprobe "$target_disk" || true
-udevadm settle || true
+partprobe "$target_disk"
+udevadm settle
 
 efi_part=$(partition_path "$target_disk" 1)
 root_part=$(partition_path "$target_disk" 2)
