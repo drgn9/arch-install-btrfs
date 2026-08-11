@@ -405,7 +405,7 @@ replace_root_from_snapshot() {
             remove_boot_backup "$backup_dir"
             die "$promotion_error The original root, default subvolume, and UKIs were restored."
         fi
-        die "$promotion_error Automatic restoration failed. DO NOT REBOOT. Original root ID: $old_root_id; replacement root ID: $new_root_id; UKI backups: $backup_dir"
+        die "$promotion_error Automatic restoration failed. DO NOT REBOOT. Original root ID: $old_root_id; original default ID: $original_default_id; replacement root ID: $new_root_id; UKI backups: $backup_dir"
     fi
     trap 'exit 130' INT TERM
     remove_boot_backup "$backup_dir"

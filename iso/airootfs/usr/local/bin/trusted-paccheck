@@ -58,6 +58,9 @@ mount_opts=$(findmnt -n -o OPTIONS --target "$TARGET")
 if [[ ",$mount_opts," != *,ro,* ]]; then
     die "$TARGET is not mounted read-only."
 fi
+if [[ ",$mount_opts," != *,nologreplay,* && ",$mount_opts," != *,norecovery,* ]]; then
+    die "$TARGET is not mounted with nologreplay; refusing a check that may replay the Btrfs tree log."
+fi
 
 [[ -d "$TARGET/var/lib/pacman/local" ]] || die "$TARGET/var/lib/pacman/local does not exist."
 
