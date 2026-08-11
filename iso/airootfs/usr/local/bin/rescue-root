@@ -184,6 +184,42 @@ mount_for_repair() {
     show_action "NEXT STEPS" "${next_steps[@]}"
 }
 
+check_package_integrity() {
+    local mode result
+
+    command -v trusted-paccheck >/dev/null 2>&1 || die 'trusted-paccheck is not available in this environment.'
+
+    show_section "Package Integrity Check"
+    mode=$(gum choose --header 'How should non-official (AUR/custom) packages be handled?' \
+        'Strict: fail if any installed package is not an official Arch package' \
+        'Official only: check official packages, report skipped foreign packages')
+
+    select_target
+
+    show_info 'Mounting the installed system read-only with nologreplay'
+    mount -o "ro,nologreplay,$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
+    mounted=yes
+
+    result=0
+    case "$mode" in
+        Strict:*) trusted-paccheck || result=$? ;;
+        *) trusted-paccheck --official-only || result=$? ;;
+    esac
+
+    umount /mnt
+    mounted=no
+    if [[ "$opened_luks" == yes ]]; then
+        cryptsetup close cryptroot
+        opened_luks=no
+    fi
+
+    if (( result == 0 )); then
+        show_success 'Package integrity check passed.'
+    else
+        die "Package integrity check reported problems (exit $result). Review the output above."
+    fi
+}
+
 list_snapshots() {
     local snapshot_dir entry info description
 
@@ -437,9 +473,11 @@ show_header
 show_section "Choose Rescue Action"
 action=$(gum choose --header 'What do you need to do?' \
     'Repair installed system' \
-    'Restore root from snapshot')
+    'Restore root from snapshot' \
+    'Check package integrity')
 
 case "$action" in
     'Repair installed system') mount_for_repair ;;
     'Restore root from snapshot') replace_root_from_snapshot ;;
+    'Check package integrity') check_package_integrity ;;
 esac

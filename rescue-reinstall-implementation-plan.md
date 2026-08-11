@@ -6,7 +6,7 @@ This plan tracks the future V2 rescue reinstall feature.
 
 ## Goal
 
-Add a third `rescue-root` action:
+Add a new `rescue-root` action:
 
 ```text
 Reinstall OS preserving selected state
@@ -135,7 +135,7 @@ After adding `installer-common.bash`, refactor `install.bash` to source it witho
 
 ## Phase 5: Add Rescue Reinstall Menu Action
 
-Add a third action to `iso/airootfs/usr/local/bin/rescue-root`:
+Add a new action to `iso/airootfs/usr/local/bin/rescue-root`:
 
 ```text
 Reinstall OS preserving selected state
@@ -145,6 +145,7 @@ Reinstall OS preserving selected state
 - [ ] Print the payload version (build date) at the start of the reinstall action so running from a stale embedded payload is a conscious choice.
 - [ ] Keep the existing `Repair installed system` action unchanged.
 - [ ] Keep the existing `Restore root from snapshot` action unchanged.
+- [ ] Keep the existing `Check package integrity` action unchanged.
 - [ ] Add `reinstall_preserving_state` as the implementation function for the new action.
 - [ ] Fail clearly if the shared installer payload is missing.
 
@@ -325,6 +326,7 @@ sudo ./iso/build.sh
 - [ ] Fresh USB installer still passes scripted checks.
 - [ ] Current rescue manual mount action still works.
 - [ ] Current rescue root replacement action still works.
+- [ ] Current rescue package integrity action still works.
 - [ ] Rescue UKI still builds.
 - [ ] Custom ISO still builds.
 - [ ] Fresh install works on hardware.

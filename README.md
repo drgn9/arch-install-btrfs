@@ -379,11 +379,12 @@ rescue-root
 trusted-paccheck
 ```
 
-`rescue-root` is a guided Bash command with two actions:
+`rescue-root` is a guided Bash command with three actions:
 
 ```text
 Repair installed system
 Restore root from snapshot
+Check package integrity
 ```
 
 It assumes the disk layout created by this installer:
@@ -401,7 +402,9 @@ It refuses to continue if `/mnt` is already mounted or `/dev/mapper/cryptroot` a
 
 Use `trusted-paccheck` when you want to compare installed official Arch package files against metadata reconstructed from signed archive packages.
 
-It requires the installed root to be mounted read-only at `/mnt`:
+The guided path is the `rescue-root` menu action `Check package integrity`: it asks how to handle non-official packages, unlocks LUKS, mounts the installed root read-only with `nologreplay`, runs `trusted-paccheck`, and unmounts and closes LUKS afterwards. `trusted-paccheck` still independently verifies the read-only and `nologreplay` mount flags before checking anything.
+
+To run it manually instead, mount the installed root read-only at `/mnt` yourself:
 
 ```bash
 cryptsetup open --token-only ROOT_PARTITION cryptroot
