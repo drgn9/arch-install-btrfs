@@ -30,33 +30,30 @@ ensure_ready() {
     [[ ! -e "$PACMAN_LOCK" ]] || die "$PACMAN_LOCK exists. Remove it only after verifying pacman is not running."
 }
 
-list_pairs() {
-    snapper -c "$CONFIG" --csvout --separator '|' --no-headers list \
+select_latest_pair() {
+    local pre post date description
+
+    selected_pre=
+    selected_post=0
+    selected_date=
+    selected_description=
+
+    while IFS='|' read -r pre post date description; do
+        [[ "$pre" =~ ^[0-9]+$ && "$post" =~ ^[0-9]+$ ]] || continue
+        if (( post > selected_post )); then
+            selected_pre=$pre
+            selected_post=$post
+            selected_date=$date
+            selected_description=$description
+        fi
+    done < <(snapper -c "$CONFIG" --csvout --separator '|' --no-headers list \
         --type pre-post --disable-used-space \
-        --columns number,type,pre-number,date,description |
-        awk -F'|' '$2 == "post" && $3 ~ /^[0-9]+$/ && $1 ~ /^[0-9]+$/ { printf "%s|%s|%s|%s\n", $3, $1, $4, $5 }'
-}
+        --columns number,post-number,date,description)
 
-select_pair() {
-    local pairs=()
-    local line index choice
+    [[ -n "$selected_pre" ]] || die 'No completed Snapper pre/post pairs found.'
 
-    mapfile -t pairs < <(list_pairs | sort -t'|' -k2,2nr)
-    (( ${#pairs[@]} > 0 )) || die 'No Snapper pre/post pairs found.'
-
-    printf '\nRecent pacman transactions:\n\n'
-    index=1
-    for line in "${pairs[@]:0:20}"; do
-        IFS='|' read -r pre post date description <<<"$line"
-        printf '%2d. %s..%s  %s  %s\n' "$index" "$pre" "$post" "$date" "$description"
-        ((index++))
-    done
-
-    read -rp $'\nSelect transaction: ' choice
-    [[ "$choice" =~ ^[0-9]+$ ]] || die 'Selection must be a number.'
-    (( choice >= 1 && choice < index )) || die 'Selection out of range.'
-
-    IFS='|' read -r selected_pre selected_post _ <<<"${pairs[$((choice - 1))]}"
+    printf '\nLatest pacman transaction:\n\n'
+    printf '  %s..%s  %s  %s\n' "$selected_pre" "$selected_post" "$selected_date" "$selected_description"
 }
 
 show_change_summary() {
@@ -89,15 +86,8 @@ sign_and_verify_ukis() {
 
 ensure_ready
 
-if (( $# == 0 )); then
-    select_pair
-elif (( $# == 2 )); then
-    [[ "$1" =~ ^[0-9]+$ && "$2" =~ ^[0-9]+$ ]] || die 'Snapshot numbers must be numeric.'
-    selected_pre=$1
-    selected_post=$2
-else
-    die 'Usage: rollback-root [PRE POST]'
-fi
+(( $# == 0 )) || die 'Usage: rollback-root'
+select_latest_pair
 
 status_file=$(mktemp)
 trap 'rm -f "$status_file"' EXIT
@@ -109,7 +99,7 @@ printf '\n'
 cat "$status_file"
 printf '\n'
 
-confirm "Undo transaction $selected_pre..$selected_post?" || die 'Rollback cancelled.'
+confirm "Undo transaction $selected_pre..$selected_post and delete its snapshots after success?" || die 'Rollback cancelled.'
 
 snapper -c "$CONFIG" undochange "$selected_pre..$selected_post"
 
@@ -120,15 +110,23 @@ fi
 mkinitcpio -P
 sign_and_verify_ukis
 
+if ! snapper -c "$CONFIG" delete "$selected_pre" "$selected_post"; then
+    die "Rollback succeeded, but snapshots $selected_pre and $selected_post could not be deleted. Delete them manually with: snapper -c $CONFIG delete $selected_pre $selected_post"
+fi
+
 cat <<'EOF'
 
 Rollback finished.
 
 This is a file-level reversal of one pacman transaction, not a complete
-system downgrade. If you reversed a partial upgrade or a kernel/userspace
-boundary, reboot now and inspect the system.
+system downgrade.
+
+REBOOT REQUIRED: reboot before continuing to use the system so the running
+kernel and userspace match the rolled-back files and rebuilt UKI.
 EOF
 
 if confirm 'Reboot now?'; then
     systemctl reboot
+else
+    printf 'Reboot is still required. Run: systemctl reboot\n'
 fi

@@ -294,27 +294,22 @@ Normal rollback happens from the installed system with:
 sudo rollback-root
 ```
 
-Direct form:
-
-```bash
-sudo rollback-root PRE POST
-```
-
 What `rollback-root` does:
 
-1. Lists recent Snapper pre/post pairs created by `snap-pac`.
-2. Shows `snapper status PRE..POST` for the selected pair.
-3. Asks for confirmation.
+1. Selects the newest completed Snapper pre/post pair created by `snap-pac`.
+2. Shows `snapper status PRE..POST` for that pair.
+3. Asks for confirmation, including that the consumed snapshots will be deleted.
 4. Runs `snapper -c root undochange PRE..POST`.
 5. Rebuilds UKIs with `mkinitcpio -P`.
 6. Requires the `sbctl` keys, then signs and verifies UKIs.
-7. Offers to reboot.
+7. Deletes the successfully consumed pre/post pair.
+8. Instructs you to reboot before continuing to use the system.
 
 What it does not do:
 
 - It does not create safety snapshots.
 - It does not maintain rollback journals.
-- It does not automatically delete snapshots.
+- It does not delete snapshots other than the successfully consumed pair.
 
 Snapper configuration created by the installer:
 
@@ -325,7 +320,7 @@ NUMBER_CLEANUP=no
 EMPTY_PRE_POST_CLEANUP=no
 ```
 
-Snapshots are retained until you manually delete them.
+All snapshots other than a successfully consumed rollback pair are retained until you manually delete them. Running `rollback-root` again selects the previous completed pair, allowing package transactions to be undone newest-first.
 
 Delete one snapshot:
 
@@ -343,7 +338,7 @@ sudo snapper -c root delete PRE_NUMBER POST_NUMBER
 
 Use rescue when the installed system cannot boot normally, cannot be unlocked normally, or needs root filesystem repair from outside the running system.
 
-If the installed system still boots, prefer `rollback-root` first. It is narrower: it reverts one selected pacman pre/post pair from inside the running system.
+If the installed system still boots, prefer `rollback-root` first. It is narrower: it reverts the newest pacman pre/post pair from inside the running system.
 
 Use `rescue-root` when you need an offline repair environment or when the running system is too broken to trust.
 
