@@ -70,18 +70,30 @@ show_change_summary() {
     printf '  delete: %s\n' "$deleted"
 }
 
+# sbctl verify exits 0 even for unsigned files, so check the JSON output.
+verify_signed_file() {
+    local file=$1 verification
+
+    verification=$(sbctl --json verify "$file") || die "Could not verify $file."
+    jq -e 'length == 1 and .[0].is_signed == 1' <<<"$verification" >/dev/null \
+        || die "$file is not signed. Fix signing before rebooting; the snapshot pair was retained."
+}
+
 sign_and_verify_ukis() {
     command -v sbctl >/dev/null 2>&1 || die 'sbctl is required to sign rebuilt UKIs.'
+    command -v jq >/dev/null 2>&1 || die 'jq is required to verify rebuilt UKIs.'
     [[ -d /var/lib/sbctl/keys ]] || die 'Secure Boot keys are unavailable; refusing to leave rebuilt UKIs unsigned.'
 
     sbctl sign -s /efi/EFI/Linux/arch-linux.efi
+    verify_signed_file /efi/EFI/Linux/arch-linux.efi
     if [[ -f /efi/EFI/Linux/arch-rescue.efi ]]; then
         sbctl sign -s /efi/EFI/Linux/arch-rescue.efi
+        verify_signed_file /efi/EFI/Linux/arch-rescue.efi
     fi
     if [[ -f /usr/lib/fwupd/efi/fwupdx64.efi ]]; then
         sbctl sign -s -o /usr/lib/fwupd/efi/fwupdx64.efi.signed /usr/lib/fwupd/efi/fwupdx64.efi
+        verify_signed_file /usr/lib/fwupd/efi/fwupdx64.efi.signed
     fi
-    sbctl verify
 }
 
 ensure_ready
