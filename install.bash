@@ -757,6 +757,7 @@ while true; do
     username=$(gum input --header "Enter username:" --placeholder "user")
     [[ -n "$username" ]] || { show_error "You need to enter a username"; continue; }
     [[ "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { show_error "Invalid username"; continue; }
+    [[ "$username" != root ]] || { show_error "root cannot be used as the regular account"; continue; }
     break
 done
 
