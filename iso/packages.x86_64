@@ -2,7 +2,6 @@ git
 curl
 gum
 impala
-jq
 btrfs-progs
 iptables
 snapper

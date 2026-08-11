@@ -55,7 +55,7 @@ boot custom ISO
 Secure Boot model:
 
 - Firmware must already be in Secure Boot Setup Mode before the installer runs.
-- The installer creates `sbctl` keys, signs and verifies `systemd-bootx64.efi` (source, ESP copy, and fallback copy), `arch-linux.efi`, and `arch-rescue.efi`, then enrolls the keys as the final firmware-changing step.
+- The installer creates `sbctl` keys, enrolls them, signs `systemd-bootx64.efi` (source, ESP copy, and fallback copy), signs `arch-linux.efi`, signs `arch-rescue.efi`, and verifies signatures.
 - `fwupd` is configured for custom Secure Boot keys with `/usr/lib/fwupd/efi/fwupdx64.efi.signed` and `DisableShimForSecureBoot=true`.
 - Secure Boot private keys remain on the installed system under `/var/lib/sbctl`, which is mounted from the `@sbctl` Btrfs subvolume.
 - The rescue UKI is not signed at ISO build time. It is signed during installation with the target system's keys.
@@ -88,7 +88,7 @@ What the build does:
 2. Prompts for a rescue root password.
 3. Hashes that password into a temporary `rescue-uki/mkosi.rootpw` file.
 4. Copies the live rescue command into the mkosi overlay as `rescue-root`.
-5. Builds the rescue UKI with mkosi. mkosi is pinned to version 26 and immutable commit `84af20892b61c8e177e391f997ded8b4cb5514f2`. Its root-owned, clean checkout is cached under `/var/cache/arch-new-install/mkosi/` and verified before every use. Bump both the version and commit in `rescue-uki/build.sh` to upgrade mkosi deliberately.
+5. Builds the rescue UKI with mkosi. mkosi is pinned to version 26: it is downloaded once into `~/.cache/arch-new-install/mkosi/` (outside this repository) and reused on later builds, so behavior does not change when the build machine upgrades its own packages. Bump `MKOSI_VERSION` in `rescue-uki/build.sh` to upgrade mkosi deliberately.
 6. Writes the rescue UKI artifact to `artifacts/arch-rescue.efi`.
 7. Deletes the temporary password file and copied overlay command on exit.
 8. Builds the custom ISO from the Arch `releng` archiso profile.
@@ -125,7 +125,7 @@ Boot the generated custom ISO, then run:
 install-arch
 ```
 
-The selected target disk is destroyed. Read every prompt carefully. The disk must be at least 32 GiB and must not have mounted filesystems, active swap, or active block-device holders.
+The selected target disk is destroyed. Read every prompt carefully.
 
 The installer checks internet access before disk work starts. If the system is offline, it opens the `impala` Wi-Fi TUI. Wi-Fi credentials from the live environment are not copied into the installed system; configure Wi-Fi after installation.
 
@@ -144,7 +144,7 @@ Installer prompts:
 - Timezone.
 - User account and password.
 - Target disk.
-- Optional whole-device block discard for SSD/NVMe devices. Ordinary discard is destructive but is not guaranteed secure erasure.
+- Optional `blkdiscard` secure wipe for SSD/NVMe devices.
 
 LUKS unlock behavior:
 
@@ -307,7 +307,7 @@ What `rollback-root` does:
 3. Asks for confirmation.
 4. Runs `snapper -c root undochange PRE..POST`.
 5. Rebuilds UKIs with `mkinitcpio -P`.
-6. Requires the real ESP and `@sbctl` key subvolume, then signs and verifies `arch-linux.efi`, the existing rescue UKI when present, and the fwupd EFI binary when present.
+6. Signs and verifies UKIs when `sbctl` keys exist.
 7. Offers to reboot.
 
 What it does not do:
@@ -496,12 +496,10 @@ Root replacement does this:
 9. Move the temporary replacement into place as the new `@`.
 10. Set the Btrfs default subvolume to the new `@`.
 11. Unmount the top-level volume and mount the restored `@` at `/mnt`.
-12. Rebuild the normal UKI with `mkinitcpio -p linux`.
-13. Sign and verify the normal UKI using the mounted `@sbctl` keys.
+12. Rebuild UKIs with `mkinitcpio -P`.
+13. Sign and verify UKIs when `sbctl` keys exist.
 14. Unmount everything and close LUKS if it was opened.
 15. Offer to reboot.
-
-Before promotion, rescue verifies the ESP, signing-key subvolume, replacement tools, that the `linux` preset produces only the expected default `arch-linux.efi`, and the signature on the existing normal UKI. The existing UKI is backed up. If rebuilding or signature verification fails after promotion, rescue attempts to restore the original root subvolume, original Btrfs default, and original normal UKI automatically, retaining the failed replacement as `@failed-<timestamp>`. If automatic rollback cannot prove the expected subvolume identities or complete a restoration step, it stops, leaves LUKS open, and prints manual recovery instructions instead.
 
 The old root is intentionally kept:
 

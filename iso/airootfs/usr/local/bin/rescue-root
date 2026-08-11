@@ -14,20 +14,6 @@ opened_luks=no
 mounted=no
 top_mounted=no
 cleanup_enabled=yes
-replacement_promoted=no
-original_default_id=
-original_default_info=
-old_root=
-old_root_id=
-new_root_id=
-failed_root=
-uki_backup=
-uki_rebuild_started=no
-rollback_failed=no
-cleanup_running=no
-candidate_created=no
-new_root=
-rollback_esp_mount=
 UI_ACCENT=212
 UI_ACTION=214
 UI_SUCCESS=82
@@ -81,79 +67,18 @@ confirm() {
 
 cleanup_on_failure() {
     local status=${1:-$?}
-    local cleanup_failed=no
-    local mapper_device mount_source
 
     (( status != 0 )) || return 0
     [[ "$cleanup_enabled" == yes ]] || return 0
-    [[ "$cleanup_running" == no ]] || return 0
-    cleanup_running=yes
-    trap - EXIT
-    trap '' HUP INT TERM
 
-    if [[ "$replacement_promoted" == yes ]]; then
-        rollback_root_replacement
+    if [[ "$mounted" == yes || "$top_mounted" == yes ]]; then
+        umount -R /mnt 2>/dev/null || true
     fi
-
-    if [[ "$candidate_created" == yes && "$replacement_promoted" == no && "$rollback_failed" == no ]]; then
-        cleanup_unpromoted_candidate || cleanup_failed=yes
-    fi
-
-    if [[ -n "$rollback_esp_mount" ]]; then
-        if findmnt -rn -M "$rollback_esp_mount" >/dev/null 2>&1 && ! umount "$rollback_esp_mount"; then
-            printf 'ERROR: Failed to unmount the rollback ESP mount.\n' >&2
-            cleanup_failed=yes
-        else
-            rmdir "$rollback_esp_mount" 2>/dev/null || true
-            rollback_esp_mount=
-        fi
-    fi
-
-    if [[ "$mounted" != no || "$top_mounted" != no ]]; then
-        if ! findmnt -rn -M /mnt >/dev/null 2>&1; then
-            mounted=no
-            top_mounted=no
-        else
-            mount_source=$(readlink -f -- "$(findmnt -v -rn -M /mnt -o SOURCE)")
-            if [[ -z "${root_device:-}" || "$mount_source" != "$(readlink -f -- "$root_device")" ]]; then
-                printf 'ERROR: Refusing to unmount /mnt because it is not mounted from the selected root device.\n' >&2
-                cleanup_failed=yes
-            elif umount -R /mnt; then
-                mounted=no
-                top_mounted=no
-            else
-                printf 'ERROR: Failed to unmount rescue filesystems under /mnt.\n' >&2
-                cleanup_failed=yes
-            fi
-        fi
-    fi
-    if [[ "$opened_luks" != no ]]; then
-        if [[ "$rollback_failed" == yes ]]; then
-            printf 'The cryptroot mapper was intentionally left open for manual recovery.\n' >&2
-        elif [[ -e /dev/mapper/cryptroot ]]; then
-            mapper_device=$(cryptsetup status cryptroot 2>/dev/null | awk '$1 == "device:" { print $2 }')
-            if [[ -z "${root_part:-}" || "$(readlink -f -- "$mapper_device")" != "$(readlink -f -- "$root_part")" ]]; then
-                printf 'ERROR: Refusing to close cryptroot because it is not backed by the selected root partition.\n' >&2
-                cleanup_failed=yes
-            elif ! cryptsetup close cryptroot; then
-                printf 'ERROR: Failed to close rescue mapper cryptroot.\n' >&2
-                cleanup_failed=yes
-            else
-                opened_luks=no
-            fi
-        else
-            opened_luks=no
-        fi
-    fi
-    if [[ -n "$uki_backup" && "$rollback_failed" == no ]]; then
-        rm -f -- "$uki_backup"
-    fi
-    if [[ "$cleanup_failed" == yes ]]; then
-        printf 'Manual cleanup is required before rebooting.\n' >&2
+    if [[ "$opened_luks" == yes ]]; then
+        cryptsetup close cryptroot 2>/dev/null || true
     fi
 }
 trap 'cleanup_on_failure "$?"' EXIT
-trap 'exit 129' HUP
 trap 'exit 130' INT TERM
 
 partition_path() {
@@ -198,12 +123,10 @@ select_target() {
             show_action "ACTION REQUIRED: SECURITY TOKEN" \
                 "Insert your FIDO2 key if you use one." \
                 "The next prompt asks for your token PIN."
-            opened_luks=opening
             cryptsetup open --token-only "$root_part" cryptroot
         else
             show_action "ACTION REQUIRED: LUKS UNLOCK" \
                 "Enter a LUKS passphrase or recovery key at the next prompt."
-            opened_luks=opening
             cryptsetup open --disable-external-tokens "$root_part" cryptroot
         fi
         opened_luks=yes
@@ -212,9 +135,6 @@ select_target() {
 }
 
 mount_installed_system() {
-    local mode=${1:-permissive}
-
-    mounted=mounting
     mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
     mounted=yes
 
@@ -222,35 +142,15 @@ mount_installed_system() {
     chmod 1777 /mnt/var/tmp
 
     if [[ -d /mnt/efi ]]; then
-        if ! mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" /mnt/efi; then
-            [[ "$mode" == strict ]] && die 'Could not mount the ESP during root replacement.'
-            show_warn 'Could not mount the ESP.'
-        fi
+        mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" /mnt/efi
     else
-        [[ "$mode" == strict ]] && die '/mnt/efi does not exist in the replacement root.'
         show_warn '/mnt/efi does not exist; the ESP was not mounted.'
     fi
 
     # @sbctl holds the Secure Boot keys; without it no UKI can be signed.
-    if [[ "$mode" == strict ]]; then
-        [[ -d /mnt/var/lib/sbctl ]] || die '/var/lib/sbctl does not exist in the replacement root.'
-    else
-        install -d -m 0755 /mnt/var/lib/sbctl
-    fi
+    install -d -m 0755 /mnt/var/lib/sbctl
     if ! mount -o "$BTRFS_STRICT_MOUNT_OPTIONS,subvol=@sbctl" "$root_device" /mnt/var/lib/sbctl; then
-        [[ "$mode" == strict ]] && die 'Could not mount @sbctl during root replacement.'
         show_warn 'Could not mount @sbctl; UKI signing will be unavailable.'
-    fi
-    if [[ "$mode" == strict ]]; then
-        [[ "$(findmnt -v -rn -M /mnt -o FSTYPE)" == btrfs ]] || die '/mnt is not mounted as Btrfs.'
-        [[ "$(readlink -f -- "$(findmnt -v -rn -M /mnt -o SOURCE)")" == "$(readlink -f -- "$root_device")" ]] || die '/mnt is not mounted from the expected root device.'
-        [[ "$(findmnt -rn -M /mnt -o FSROOT)" == /@ ]] || die '/mnt is not mounted from @.'
-        [[ "$(subvolume_id /mnt)" == "$new_root_id" ]] || die '/mnt does not contain the promoted replacement root.'
-        [[ -d /mnt/var/lib/sbctl/keys ]] || die 'sbctl keys were not found in the mounted @sbctl subvolume.'
-        [[ "$(findmnt -rn -M /mnt/efi -o FSTYPE)" == vfat ]] || die '/mnt/efi is not the mounted FAT ESP.'
-        [[ "$(readlink -f -- "$(findmnt -rn -M /mnt/efi -o SOURCE)")" == "$(readlink -f -- "$efi_part")" ]] || die '/mnt/efi is not mounted from the expected ESP partition.'
-        [[ "$(findmnt -rn -M /mnt/var/lib/sbctl -o FSTYPE)" == btrfs ]] || die '/var/lib/sbctl is not mounted as Btrfs.'
-        [[ "$(findmnt -rn -M /mnt/var/lib/sbctl -o FSROOT)" == /@sbctl ]] || die '/var/lib/sbctl is not mounted from @sbctl.'
     fi
 }
 
@@ -262,7 +162,7 @@ mount_for_repair() {
     mount_installed_system
 
     cleanup_enabled=no
-    trap - HUP INT TERM
+    trap - INT TERM
 
     show_success "Installed system mounted at /mnt."
     next_steps=(
@@ -295,182 +195,31 @@ list_snapshots() {
 }
 
 sign_and_verify_ukis() {
-    local verification
-
-    arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-linux.efi
-    verification=$(arch-chroot /mnt sbctl --json verify /efi/EFI/Linux/arch-linux.efi)
-    jq -e 'length == 1 and .[0].is_signed == 1' <<<"$verification" >/dev/null
-}
-
-subvolume_id() {
-    btrfs inspect-internal rootid "$1"
-}
-
-cleanup_unpromoted_candidate() {
-    local candidate="/mnt/$new_root"
-
-    [[ -n "$new_root" && -d "$candidate" ]] || { candidate_created=no; return 0; }
-    [[ "$(subvolume_id "$candidate" 2>/dev/null)" == "$new_root_id" ]] || return 1
-
-    if findmnt -rn -M "$candidate/var/lib/sbctl" >/dev/null 2>&1; then
-        umount "$candidate/var/lib/sbctl" || return 1
-    fi
-    if findmnt -rn -M "$candidate/efi" >/dev/null 2>&1; then
-        umount "$candidate/efi" || return 1
-    fi
-    btrfs subvolume delete "$candidate" >/dev/null || return 1
-    candidate_created=no
-}
-
-preflight_replacement() {
-    local candidate=$1 fs_type key part_type verification
-
-    command -v jq >/dev/null 2>&1 || die 'jq is required for Secure Boot verification.'
-    fs_type=$(blkid -s TYPE -o value "$efi_part") || die "Could not identify the filesystem on expected ESP $efi_part."
-    part_type=$(blkid -s PART_ENTRY_TYPE -o value "$efi_part") || die "Could not identify the partition type of expected ESP $efi_part."
-    [[ "$fs_type" == vfat ]] || die "Expected ESP $efi_part is not FAT (found $fs_type)."
-    [[ "${part_type,,}" == c12a7328-f81f-11d2-ba4b-00a0c93ec93b ]] || die "Expected ESP $efi_part is not marked as an EFI System Partition."
-
-    [[ -d "$candidate/efi" ]] || die 'The replacement root has no /efi mount point.'
-    [[ -d "$candidate/var/lib/sbctl" ]] || die 'The replacement root has no /var/lib/sbctl mount point.'
-    [[ ! -L "$candidate/efi" && ! -L "$candidate/var/lib/sbctl" ]] || die 'Replacement boot mount points must not be symbolic links.'
-    [[ -x "$candidate/usr/bin/mkinitcpio" ]] || die 'mkinitcpio is not installed in the replacement root.'
-    [[ -x "$candidate/usr/bin/sbctl" ]] || die 'sbctl is not installed in the replacement root.'
-    [[ -f "$candidate/etc/mkinitcpio.d/linux.preset" ]] || die 'The replacement root has no linux mkinitcpio preset.'
-    grep -qsE "^[[:space:]]*default_uki=['\"]?/efi/EFI/Linux/arch-linux\.efi['\"]?[[:space:]]*$" "$candidate/etc/mkinitcpio.d/linux.preset" || die 'The linux preset does not build /efi/EFI/Linux/arch-linux.efi.'
-    grep -qsE "^[[:space:]]*PRESETS=\(['\"]default['\"]\)" "$candidate/etc/mkinitcpio.d/linux.preset" || die 'The linux preset contains unexpected additional outputs.'
-
-    mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" "$candidate/efi" || die 'Could not mount the expected ESP during replacement preflight.'
-    mount -o "$BTRFS_STRICT_MOUNT_OPTIONS,subvol=@sbctl" "$root_device" "$candidate/var/lib/sbctl" || die 'Could not mount @sbctl during replacement preflight.'
-    [[ "$(findmnt -rn -M "$candidate/efi" -o FSTYPE)" == vfat ]] || die 'Replacement ESP preflight did not mount a FAT filesystem.'
-    [[ "$(readlink -f -- "$(findmnt -rn -M "$candidate/efi" -o SOURCE)")" == "$(readlink -f -- "$efi_part")" ]] || die 'Replacement ESP preflight mounted the wrong source.'
-    [[ "$(findmnt -rn -M "$candidate/var/lib/sbctl" -o FSTYPE)" == btrfs ]] || die 'Replacement @sbctl preflight did not mount Btrfs.'
-    [[ "$(readlink -f -- "$(findmnt -v -rn -M "$candidate/var/lib/sbctl" -o SOURCE)")" == "$(readlink -f -- "$root_device")" ]] || die 'Replacement @sbctl is not mounted from the root Btrfs filesystem.'
-    [[ "$(findmnt -rn -M "$candidate/var/lib/sbctl" -o FSROOT)" == /@sbctl ]] || die 'Replacement key mount is not @sbctl.'
-    for key in PK/PK.key PK/PK.pem KEK/KEK.key KEK/KEK.pem db/db.key db/db.pem; do
-        [[ -s "$candidate/var/lib/sbctl/keys/$key" ]] || die "Required sbctl key is unusable: $key"
-    done
-    [[ -d "$candidate/efi/EFI/Linux" ]] || die 'The normal UKI destination directory is missing from the ESP.'
-    [[ -s "$candidate/efi/EFI/Linux/arch-linux.efi" ]] || die 'The normal arch-linux.efi UKI is missing or empty on the ESP.'
-    verification=$(arch-chroot "$candidate" sbctl --json verify /efi/EFI/Linux/arch-linux.efi)
-    jq -e 'length == 1 and .[0].is_signed == 1' <<<"$verification" >/dev/null || die 'The existing normal UKI is not signed by the installed Secure Boot key.'
-
-    uki_backup=$(mktemp /run/arch-linux.efi.XXXXXX)
-    install -m 0600 "$candidate/efi/EFI/Linux/arch-linux.efi" "$uki_backup" || die 'Could not preserve the current normal UKI before root replacement.'
-
-    umount "$candidate/var/lib/sbctl" || die 'Could not unmount @sbctl after replacement preflight.'
-    umount "$candidate/efi" || die 'Could not unmount the ESP after replacement preflight.'
-}
-
-print_rollback_instructions() {
-    rollback_failed=yes
-    printf '\n%s\n' 'AUTOMATIC ROOT ROLLBACK FAILED. DO NOT REBOOT.' >&2
-    printf '%s\n' \
-        "Unmount rescue mounts: umount -R /mnt" \
-        "Mount the Btrfs top level: mount -o $BTRFS_MOUNT_OPTIONS,subvolid=5 $root_device /mnt" \
-        "Locate subvolumes by ID: btrfs subvolume list /mnt" \
-        "Original root ID: $old_root_id (expected at @ or $old_root)" \
-        "Failed replacement ID: $new_root_id (expected at @ or $failed_root)" \
-        'Verify those IDs before moving either subvolume.' \
-        "Retain the failed replacement as $failed_root, restore original root ID $old_root_id to @," \
-        "then restore the original default: btrfs subvolume set-default $original_default_id /mnt" \
-        "Original default was: $original_default_info" >&2
-    if [[ "$uki_rebuild_started" == yes && -n "$uki_backup" ]]; then
-        printf '%s\n' \
-            "The pre-replacement normal UKI remains at: $uki_backup" \
-            "Mount $efi_part and restore it to EFI/Linux/arch-linux.efi before rebooting the original root." >&2
-    fi
-}
-
-restore_original_uki() {
-    local restore_tmp
-
-    [[ "$uki_rebuild_started" == yes ]] || return 0
-    [[ -s "$uki_backup" ]] || return 1
-    rollback_esp_mount=$(mktemp -d /run/arch-rescue-esp.XXXXXX) || return 1
-    mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" "$rollback_esp_mount" || return 1
-    if [[ "$(findmnt -rn -M "$rollback_esp_mount" -o FSTYPE)" != vfat || "$(readlink -f -- "$(findmnt -rn -M "$rollback_esp_mount" -o SOURCE)")" != "$(readlink -f -- "$efi_part")" ]]; then
-        umount "$rollback_esp_mount" 2>/dev/null || true
-        return 1
-    fi
-    restore_tmp="$rollback_esp_mount/EFI/Linux/.arch-linux.efi.rollback.$$"
-    if ! install -m 0644 "$uki_backup" "$restore_tmp" || ! sync -f "$restore_tmp" || ! mv -f "$restore_tmp" "$rollback_esp_mount/EFI/Linux/arch-linux.efi"; then
-        rm -f -- "$restore_tmp"
-        umount "$rollback_esp_mount" 2>/dev/null || true
-        return 1
-    fi
-    umount "$rollback_esp_mount" || return 1
-    rmdir "$rollback_esp_mount" 2>/dev/null || true
-    rollback_esp_mount=
-    uki_rebuild_started=no
-}
-
-rollback_root_replacement() {
-    local current_new_id current_old_id restored_default restored_default_id
-
-    replacement_promoted=no
-    set +e
-    printf '\nRoot replacement failed after promotion; attempting automatic rollback.\n' >&2
-
-    if [[ "$mounted" != no || "$top_mounted" != no ]]; then
-        if findmnt -rn -M /mnt >/dev/null 2>&1 && ! umount -R /mnt; then
-            print_rollback_instructions
-            return 0
+    if arch-chroot /mnt bash -lc 'command -v sbctl >/dev/null 2>&1 && [[ -d /var/lib/sbctl/keys ]]'; then
+        arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-linux.efi
+        if [[ -f /mnt/efi/EFI/Linux/arch-rescue.efi ]]; then
+            arch-chroot /mnt sbctl sign -s /efi/EFI/Linux/arch-rescue.efi
         fi
-        mounted=no
-        top_mounted=no
+        if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
+            arch-chroot /mnt sbctl sign -s -o /usr/lib/fwupd/efi/fwupdx64.efi.signed /usr/lib/fwupd/efi/fwupdx64.efi
+        fi
+        arch-chroot /mnt sbctl verify
     fi
-
-    top_mounted=mounting
-    if ! mount -o "$BTRFS_MOUNT_OPTIONS,subvolid=5" "$root_device" /mnt; then
-        print_rollback_instructions
-        return 0
-    fi
-    top_mounted=yes
-
-    current_new_id=$(subvolume_id /mnt/@ 2>/dev/null)
-    current_old_id=$(subvolume_id "/mnt/$old_root" 2>/dev/null)
-    if [[ "$current_new_id" != "$new_root_id" || "$current_old_id" != "$old_root_id" || -e "/mnt/$failed_root" ]]; then
-        print_rollback_instructions
-        return 0
-    fi
-
-    if ! mv /mnt/@ "/mnt/$failed_root" || ! mv "/mnt/$old_root" /mnt/@; then
-        print_rollback_instructions
-        return 0
-    fi
-    if ! btrfs subvolume set-default "$original_default_id" /mnt; then
-        print_rollback_instructions
-        return 0
-    fi
-
-    current_old_id=$(subvolume_id /mnt/@ 2>/dev/null)
-    current_new_id=$(subvolume_id "/mnt/$failed_root" 2>/dev/null)
-    restored_default=$(btrfs subvolume get-default /mnt 2>/dev/null)
-    restored_default_id=$(awk '{print $2}' <<<"$restored_default")
-    if [[ "$current_old_id" != "$old_root_id" || "$current_new_id" != "$new_root_id" || "$restored_default_id" != "$original_default_id" ]]; then
-        print_rollback_instructions
-        return 0
-    fi
-
-    if ! restore_original_uki; then
-        print_rollback_instructions
-        return 0
-    fi
-
-    printf 'Automatic rollback succeeded. Original root ID %s is restored at @; failed root retained as %s.\n' "$old_root_id" "$failed_root" >&2
 }
 
 replace_root_from_snapshot() {
-    local snapshots selection snapshot timestamp
+    local snapshots selection snapshot old_root new_root timestamp
 
     select_target
 
 
-    top_mounted=mounting
     mount -o "$BTRFS_MOUNT_OPTIONS,subvolid=5" "$root_device" /mnt
     top_mounted=yes
-    [[ "$(subvolume_id /mnt)" == 5 ]] || die 'The Btrfs top-level subvolume was not mounted.'
+
+    # Refuse to continue before any subvolume mutation if the Secure Boot
+    # keys are missing; the rebuilt arch-linux.efi must be signed afterwards
+    # or the system will not boot.
+    [[ -d /mnt/@sbctl/keys ]] || die 'sbctl keys not found at @sbctl/keys; refusing to replace @ because the rebuilt UKI could not be signed.'
 
     show_section "Choose Snapshot"
     snapshots=$(list_snapshots)
@@ -488,58 +237,29 @@ replace_root_from_snapshot() {
     timestamp=$(date +%Y%m%d-%H%M%S)
     old_root="@old-$timestamp"
     new_root="@new-rollback-$timestamp"
-    failed_root="@failed-$timestamp"
     [[ -d /mnt/@ ]] || die 'Current root subvolume @ was not found.'
-    [[ ! -e "/mnt/$old_root" && ! -e "/mnt/$new_root" && ! -e "/mnt/$failed_root" ]] || die 'Temporary rollback subvolume name already exists.'
-
-    original_default_info=$(btrfs subvolume get-default /mnt) || die 'Could not capture the original default Btrfs subvolume.'
-    original_default_id=$(awk '{print $2}' <<<"$original_default_info")
-    [[ "$original_default_id" =~ ^[0-9]+$ ]] || die 'Could not identify the original default Btrfs subvolume ID.'
-    old_root_id=$(subvolume_id /mnt/@) || die 'Could not identify the current root subvolume.'
-    [[ "$old_root_id" =~ ^[0-9]+$ ]] || die 'Could not identify the current root subvolume ID.'
+    [[ ! -e "/mnt/$old_root" && ! -e "/mnt/$new_root" ]] || die 'Temporary rollback subvolume name already exists.'
 
     show_section "Restoring Root"
     show_info "Creating replacement from snapshot $snapshot"
     btrfs subvolume snapshot "/mnt/@snapshots/$snapshot/snapshot" "/mnt/$new_root"
     [[ -d "/mnt/$new_root" ]] || die 'Replacement root subvolume was not created.'
-    new_root_id=$(subvolume_id "/mnt/$new_root") || die 'Could not identify the replacement root subvolume.'
-    [[ "$new_root_id" =~ ^[0-9]+$ ]] || die 'Could not identify the replacement root subvolume ID.'
-    candidate_created=yes
 
-    preflight_replacement "/mnt/$new_root"
-
-    trap '' HUP INT TERM
+    trap '' INT TERM
     mv /mnt/@ "/mnt/$old_root"
     if ! mv "/mnt/$new_root" /mnt/@; then
-        if ! mv "/mnt/$old_root" /mnt/@ || [[ "$(subvolume_id /mnt/@ 2>/dev/null)" != "$old_root_id" ]]; then
-            rollback_failed=yes
-            printf '%s\n' \
-                'Root promotion failed and the original @ could not be restored automatically. DO NOT REBOOT.' \
-                "Original root ID $old_root_id is expected at $old_root; replacement ID $new_root_id is expected at $new_root." \
-                'Verify both IDs from the mounted Btrfs top level before restoring the original root to @.' >&2
-        fi
-        die 'Failed to promote replacement root subvolume.'
+        mv "/mnt/$old_root" /mnt/@ 2>/dev/null || true
+        die 'Failed to promote replacement root subvolume; original @ was restored if possible.'
     fi
-    replacement_promoted=yes
-    candidate_created=no
-    trap 'exit 129' HUP
     trap 'exit 130' INT TERM
-    [[ "$(subvolume_id /mnt/@)" == "$new_root_id" ]] || die 'Promoted root subvolume identity does not match the replacement.'
-    [[ "$(subvolume_id "/mnt/$old_root")" == "$old_root_id" ]] || die 'Retained old root subvolume identity changed during promotion.'
-    btrfs subvolume set-default "$new_root_id" /mnt
-    [[ "$(awk '{print $2}' <<<"$(btrfs subvolume get-default /mnt)")" == "$new_root_id" ]] || die 'The replacement root was not set as the Btrfs default.'
+    btrfs subvolume set-default /mnt/@
 
     umount -R /mnt
     top_mounted=no
 
-    mount_installed_system strict
-    uki_rebuild_started=yes
-    arch-chroot /mnt mkinitcpio -p linux
+    mount_installed_system
+    arch-chroot /mnt mkinitcpio -P
     sign_and_verify_ukis
-    replacement_promoted=no
-    uki_rebuild_started=no
-    rm -f -- "$uki_backup"
-    uki_backup=
 
     umount -R /mnt
     mounted=no
@@ -548,9 +268,10 @@ replace_root_from_snapshot() {
         cryptsetup close cryptroot
         opened_luks=no
     fi
+
     show_success "Root restored from snapshot $snapshot."
     show_action "OLD ROOT RETAINED" \
-        "$old_root (subvolume ID $old_root_id)" \
+        "$old_root" \
         "Keep it until the restored system is verified." \
         "Delete it later with Btrfs Assistant or btrfs subvolume delete."
 

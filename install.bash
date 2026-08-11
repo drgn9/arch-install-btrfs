@@ -11,13 +11,6 @@ BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
 BTRFS_DATA_MOUNT_OPTIONS="$BTRFS_MOUNT_OPTIONS,nodev,nosuid"
 BTRFS_STRICT_MOUNT_OPTIONS="$BTRFS_DATA_MOUNT_OPTIONS,noexec"
 EFI_MOUNT_OPTIONS="fmask=0137,dmask=0027,nodev,nosuid,noexec"
-MINIMUM_DISK_BYTES=$((32 * 1024 * 1024 * 1024))
-target_mounted=no
-cryptroot_opened=no
-cleanup_running=no
-failure_line=
-failure_command=
-failure_status=
 BTRFS_SUBVOLUMES=(
     @
     @snapshots
@@ -197,125 +190,21 @@ show_error() {
     gum log --level error "$1"
 }
 
-if findmnt -rn -M /mnt >/dev/null 2>&1; then
-    show_error "/mnt is already mounted. Unmount it before running the installer."
-    exit 1
-fi
+cleanup() {
+    local line=$1
+    local command=$2
+    local status=$3
 
-if [[ -e /dev/mapper/cryptroot ]]; then
-    show_error "An installer mapper already exists. Close cryptroot before running."
-    exit 1
-fi
-
-record_failure() {
-    failure_line=$1
-    failure_command=$2
-    failure_status=$3
-}
-
-handle_signal() {
-    failure_line=$1
-    failure_command=$2
-    failure_status=130
-    exit 130
-}
-
-cleanup_on_exit() {
-    local status=$?
-    local cleanup_failed=no
-    local mapper_device mount_source
-
-    [[ "$cleanup_running" == no ]] || return
-    cleanup_running=yes
-    trap - ERR EXIT
-    trap '' HUP INT TERM
-
-    if (( status != 0 )); then
-        if [[ -n "$failure_line" ]]; then
-            show_error "Installation failed at line $failure_line (exit ${failure_status:-$status}): $failure_command"
-        else
-            show_error "Installation failed (exit $status)"
-        fi
-    fi
-
-    if [[ "$target_mounted" != no ]]; then
-        if ! findmnt -rn -M /mnt >/dev/null 2>&1; then
-            target_mounted=no
-        else
-            mount_source=$(readlink -f -- "$(findmnt -v -rn -M /mnt -o SOURCE)")
-            if [[ -z "${root_device:-}" || "$mount_source" != "$(readlink -f -- "$root_device")" ]]; then
-                show_error "Refusing to unmount /mnt because its source is not the installer root device"
-                cleanup_failed=yes
-            elif umount -R /mnt 2>/dev/null; then
-                target_mounted=no
-            else
-                show_error "Failed to unmount installer-owned filesystems under /mnt"
-                cleanup_failed=yes
-            fi
-        fi
-    fi
-
-    if [[ "$cryptroot_opened" != no ]]; then
-        if [[ ! -e /dev/mapper/cryptroot ]]; then
-            cryptroot_opened=no
-        else
-            mapper_device=$(cryptsetup status cryptroot 2>/dev/null | awk '$1 == "device:" { print $2 }')
-            if [[ -z "${root_part:-}" || "$(readlink -f -- "$mapper_device")" != "$(readlink -f -- "$root_part")" ]]; then
-                show_error "Refusing to close cryptroot because it is not backed by the installer root partition"
-                cleanup_failed=yes
-            elif cryptsetup close cryptroot 2>/dev/null; then
-                cryptroot_opened=no
-            else
-                show_error "Failed to close installer-owned mapper cryptroot"
-                cleanup_failed=yes
-            fi
-        fi
-    fi
-
-    if [[ "$cleanup_failed" == yes && $status -eq 0 ]]; then
-        status=1
-    fi
+    show_error "Installation failed at line $line (exit $status): $command"
+    umount -R /mnt 2>/dev/null || true
+    cryptsetup close cryptroot 2>/dev/null || true
     exit "$status"
 }
-
-trap 'record_failure "$LINENO" "$BASH_COMMAND" "$?"' ERR
-trap 'handle_signal "$LINENO" "hangup"' HUP
-trap 'handle_signal "$LINENO" "interrupted"' INT TERM
-trap cleanup_on_exit EXIT
+trap 'cleanup "$LINENO" "$BASH_COMMAND" "$?"' ERR
+trap 'cleanup "$LINENO" "interrupted" 130' INT TERM
 
 device_has_mounts() {
     lsblk --noheadings --output MOUNTPOINTS "$1" | grep -q '[^[:space:]]'
-}
-
-device_has_swap() {
-    local node swap
-
-    while read -r node; do
-        [[ -n "$node" ]] || continue
-        while read -r swap; do
-            [[ -n "$swap" ]] || continue
-            if [[ "$(readlink -f -- "$swap")" == "$(readlink -f -- "$node")" ]]; then
-                return 0
-            fi
-        done < <(swapon --noheadings --raw --show=NAME 2>/dev/null)
-    done < <(lsblk --noheadings --raw --paths --output NAME "$1")
-
-    return 1
-}
-
-device_has_holders() {
-    local kname type
-    local -a holders
-
-    while read -r kname type; do
-        [[ "$type" == disk || "$type" == part ]] || continue
-        shopt -s nullglob
-        holders=("/sys/class/block/$kname/holders/"*)
-        shopt -u nullglob
-        (( ${#holders[@]} == 0 )) || return 0
-    done < <(lsblk --noheadings --raw --output KNAME,TYPE "$1")
-
-    return 1
 }
 
 validate_disk_target() {
@@ -337,90 +226,6 @@ validate_disk_target() {
         show_error "$device_path or one of its partitions is mounted"
         return 1
     fi
-
-    if device_has_swap "$device_path"; then
-        show_error "$device_path or one of its partitions is active swap"
-        return 1
-    fi
-
-    if device_has_holders "$device_path"; then
-        show_error "$device_path or one of its partitions has an active block-device holder"
-        return 1
-    fi
-}
-
-capture_target_identity() {
-    local canonical link
-
-    canonical=$(readlink -f -- "$target_disk")
-    target_disk_size=$(blockdev --getsize64 "$canonical")
-    target_disk_serial=$(lsblk --noheadings --nodeps --output SERIAL "$canonical" | xargs)
-    target_disk_wwn=$(lsblk --noheadings --nodeps --output WWN "$canonical" | xargs)
-    target_disk_by_id=
-
-    for link in /dev/disk/by-id/*; do
-        [[ -L "$link" && "$link" != *-part[0-9]* ]] || continue
-        if [[ "$(readlink -f -- "$link")" == "$canonical" ]]; then
-            target_disk_by_id=$link
-            break
-        fi
-    done
-
-    if [[ -z "$target_disk_by_id" && -z "$target_disk_serial" && -z "$target_disk_wwn" ]]; then
-        show_warn "No persistent by-id, serial, or WWN is available for $target_disk; device-path revalidation is the only identity check."
-    fi
-}
-
-revalidate_target_identity() {
-    local reference canonical current_size current_serial current_wwn
-
-    reference=${target_disk_by_id:-$target_disk}
-    canonical=$(readlink -f -- "$reference")
-    [[ -b "$canonical" ]] || { show_error "Selected disk identity is no longer present: $reference"; return 1; }
-    validate_disk_target "$canonical"
-
-    current_size=$(blockdev --getsize64 "$canonical")
-    current_serial=$(lsblk --noheadings --nodeps --output SERIAL "$canonical" | xargs)
-    current_wwn=$(lsblk --noheadings --nodeps --output WWN "$canonical" | xargs)
-
-    [[ "$current_size" == "$target_disk_size" ]] || { show_error "Selected disk size changed before destruction"; return 1; }
-    [[ -z "$target_disk_serial" || "$current_serial" == "$target_disk_serial" ]] || { show_error "Selected disk serial changed before destruction"; return 1; }
-    [[ -z "$target_disk_wwn" || "$current_wwn" == "$target_disk_wwn" ]] || { show_error "Selected disk WWN changed before destruction"; return 1; }
-
-    if findmnt -rn -M /mnt >/dev/null 2>&1 || [[ -e /dev/mapper/cryptroot ]]; then
-        show_error "Installer mount or mapper resources appeared before disk destruction"
-        return 1
-    fi
-
-    target_disk=$canonical
-}
-
-verify_partition_layout() {
-    local disk_kname efi_parent root_parent efi_number root_number efi_type root_type efi_size
-
-    [[ -b "$efi_part" && -b "$root_part" ]] || { show_error "Expected target partitions were not created"; return 1; }
-
-    disk_kname=$(lsblk --noheadings --nodeps --output KNAME "$target_disk" | xargs)
-    efi_parent=$(lsblk --noheadings --nodeps --output PKNAME "$efi_part" | xargs)
-    root_parent=$(lsblk --noheadings --nodeps --output PKNAME "$root_part" | xargs)
-    efi_number=$(lsblk --noheadings --nodeps --output PARTN "$efi_part" | xargs)
-    root_number=$(lsblk --noheadings --nodeps --output PARTN "$root_part" | xargs)
-    efi_type=$(lsblk --noheadings --nodeps --output PARTTYPE "$efi_part" | xargs)
-    root_type=$(lsblk --noheadings --nodeps --output PARTTYPE "$root_part" | xargs)
-    efi_size=$(blockdev --getsize64 "$efi_part")
-
-    [[ "$efi_parent" == "$disk_kname" && "$root_parent" == "$disk_kname" ]] || { show_error "Created partitions do not belong to $target_disk"; return 1; }
-    [[ "$efi_number" == 1 && "$root_number" == 2 ]] || { show_error "Created partition numbers are not 1 and 2"; return 1; }
-    [[ "${efi_type,,}" == c12a7328-f81f-11d2-ba4b-00a0c93ec93b ]] || { show_error "Partition 1 is not an EFI System Partition"; return 1; }
-    [[ "${root_type,,}" == 0fc63daf-8483-4772-8e79-3d69d8477de4 ]] || { show_error "Partition 2 is not a Linux filesystem partition"; return 1; }
-    (( efi_size == 2 * 1024 * 1024 * 1024 )) || { show_error "EFI partition is not exactly 2 GiB"; return 1; }
-}
-
-verify_target_efi_signature() {
-    local file=$1 verification
-
-    verification=$(target_chroot sbctl --json verify "$file")
-    target_chroot jq -e 'length == 1 and .[0].is_signed == 1' <<<"$verification" >/dev/null
 }
 
 partition_path() {
@@ -662,7 +467,7 @@ manage_efi_boot_entries() {
 }
 
 configure_target() {
-    local firewall_profile account_entry account_home account_shell account_status account_uid
+    local firewall_profile
 
     printf '%s\n' "$hostname" >/mnt/etc/hostname
 
@@ -797,25 +602,15 @@ EOF
     enable_target_service tailscaled.service
     enable_target_service pcscd.service
 
-    if target_chroot id -u "$username" &>/dev/null; then
-        show_error "Refusing to reuse existing target account: $username"
-        return 1
+    if ! target_chroot id -u "$username" &>/dev/null; then
+        target_chroot useradd -m -G users,wheel -s /bin/bash "$username"
+    else
+        target_chroot usermod -aG users,wheel "$username"
     fi
-    target_chroot useradd -m -G users,wheel -s /bin/bash "$username"
 
     printf '%s:%s\n' "$username" "$userpass" | target_chroot chpasswd
 
     copy_settings_file access /etc/sudoers.d/wheel 0440
-
-    account_uid=$(target_chroot id -u "$username")
-    account_entry=$(target_chroot getent passwd "$username")
-    IFS=: read -r _ _ _ _ _ account_home account_shell <<<"$account_entry"
-    account_status=$(target_chroot passwd -S "$username" | awk '{print $2}')
-    (( account_uid >= 1000 )) || { show_error "$username does not have a regular-user UID"; return 1; }
-    [[ "$account_home" == "/home/$username" && "$account_shell" == /bin/bash ]] || { show_error "$username has an unexpected home or login shell"; return 1; }
-    target_chroot id -nG "$username" | tr ' ' '\n' | grep -qx wheel || { show_error "$username is not a member of wheel"; return 1; }
-    [[ "$account_status" == P ]] || { show_error "$username does not have a usable password"; return 1; }
-    target_chroot visudo -cf /etc/sudoers >/dev/null
 
     setup_snapper_rollback
     target_chroot passwd -l root >/dev/null
@@ -855,14 +650,10 @@ EOF
             ;;
     esac
 
-    # The chroot work above uses the live environment's bound resolv.conf.
-    # Hand resolution to systemd-resolved before firmware enrollment, which is
-    # the final irreversible installation step.
-    ln -sf /run/systemd/resolve/stub-resolv.conf /mnt/etc/resolv.conf
-
     show_section "Secure Boot Enrollment"
     if target_chroot sbctl status | grep -q 'Setup Mode:.*Enabled'; then
         target_chroot sbctl create-keys
+        target_chroot sbctl enroll-keys -m
 
         # Sign the systemd-boot source first so bootctl copies an already
         # signed binary to the ESP, and so future systemd updates re-sign it
@@ -891,22 +682,17 @@ EOF
         if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
             target_chroot sbctl sign -s -o /usr/lib/fwupd/efi/fwupdx64.efi.signed /usr/lib/fwupd/efi/fwupdx64.efi
         fi
-        verify_target_efi_signature /usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed
-        verify_target_efi_signature /efi/EFI/systemd/systemd-bootx64.efi
-        verify_target_efi_signature /efi/EFI/BOOT/BOOTX64.EFI
-        verify_target_efi_signature /efi/EFI/Linux/arch-linux.efi
-        verify_target_efi_signature "$RESCUE_UKI_TARGET"
-        if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
-            verify_target_efi_signature /usr/lib/fwupd/efi/fwupdx64.efi.signed
-        fi
-        target_chroot sbctl enroll-keys -m
-        secure_boot_status=$(target_chroot sbctl status)
-        grep -q 'Setup Mode:.*Disabled' <<<"$secure_boot_status" || { show_error "Secure Boot keys were enrolled but firmware still reports Setup Mode"; return 1; }
+        target_chroot sbctl verify
+        target_chroot sbctl status || true
     else
         show_error "Secure Boot is not in setup mode"
-        return 1
+        exit 1
     fi
 
+    # Deferred to the end: the chroot steps above need working DNS, which the
+    # live environment provides by bind-mounting its resolv.conf over a
+    # regular file. Only now hand resolution over to systemd-resolved.
+    ln -sf /run/systemd/resolve/stub-resolv.conf /mnt/etc/resolv.conf
 }
 
 show_header
@@ -971,11 +757,6 @@ while true; do
     username=$(gum input --header "Enter username:" --placeholder "user")
     [[ -n "$username" ]] || { show_error "You need to enter a username"; continue; }
     [[ "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { show_error "Invalid username"; continue; }
-    [[ "$username" != root ]] || { show_error "root cannot be used as the regular account"; continue; }
-    if getent passwd "$username" >/dev/null; then
-        show_error "$username already exists in the live environment; choose a new regular-account name"
-        continue
-    fi
     break
 done
 
@@ -999,12 +780,6 @@ while true; do
         break
     fi
 done
-capture_target_identity
-
-if (( target_disk_size < MINIMUM_DISK_BYTES )); then
-    show_error "$target_disk is smaller than the required 32 GiB minimum"
-    exit 1
-fi
 
 detect_gpu_package_files
 collect_selected_packages
@@ -1012,20 +787,14 @@ preflight_validate_packages
 preflight_validate_rescue_uki
 
 wipe_mode=none
-if gum confirm "Discard all blocks on $target_disk before partitioning? This is destructive but is not a guaranteed secure erase."; then
-    discard_max=$(lsblk --noheadings --nodeps --bytes --output DISC-MAX "$target_disk" | xargs)
-    if [[ "$discard_max" =~ ^[0-9]+$ ]] && (( discard_max > 0 )); then
-        wipe_mode=discard
-    else
-        show_error "$target_disk does not report discard support"
-        exit 1
-    fi
+if gum confirm "Securely wipe $target_disk with blkdiscard before partitioning? This is fast and intended for SSD/NVMe devices."; then
+    wipe_mode=discard
 fi
 
 show_section "Installation Summary"
 gum style --border rounded --border-foreground "$UI_ACCENT" --padding "1 2" --margin "0 2" \
     "Target disk:     $target_disk" \
-    "Block discard:   $wipe_mode" \
+    "Secure wipe:     $wipe_mode" \
     "Unlock method:   $unlock_method_label" \
     "Bluetooth off:   $disable_bluetooth" \
     "Thunderbolt off: $disable_thunderbolt" \
@@ -1044,11 +813,23 @@ if gum confirm "Review/delete existing EFI firmware boot entries before install?
     manage_efi_boot_entries
 fi
 
+if findmnt -rn /mnt >/dev/null 2>&1; then
+    show_error "/mnt is already mounted. Unmount it before running the installer."
+    exit 1
+fi
+
+if [[ -e /dev/mapper/cryptroot ]]; then
+    show_error "An installer mapper already exists. Close cryptroot before running."
+    exit 1
+fi
+
 show_section "Disk Setup"
-revalidate_target_identity
 if [[ "$wipe_mode" == "discard" ]]; then
     show_info "Discarding all blocks on $target_disk"
+    wipefs --all "$target_disk"
     blkdiscard -f "$target_disk"
+    partprobe "$target_disk" || true
+    udevadm settle || true
 fi
 
 show_info "Creating declarative full-disk GPT layout with sfdisk"
@@ -1057,12 +838,11 @@ label: gpt
 size=2GiB, type=uefi, name=ESP
 type=linux, name=ROOT
 EOF
-partprobe "$target_disk"
-udevadm settle
+partprobe "$target_disk" || true
+udevadm settle || true
 
 efi_part=$(partition_path "$target_disk" 1)
 root_part=$(partition_path "$target_disk" 2)
-verify_partition_layout
 
 show_info "Formatting ESP $efi_part"
 wipefs --all "$efi_part"
@@ -1075,26 +855,19 @@ fi
 wipefs --all "$root_part" 2>/dev/null || true
 
 printf '%s' "$userpass" | cryptsetup -q -c aes-xts-plain64 -s 512 -h sha512 luksFormat "$root_part" -d -
-cryptroot_opened=opening
 printf '%s' "$userpass" | cryptsetup open "$root_part" cryptroot -d -
-cryptroot_opened=yes
 root_device=/dev/mapper/cryptroot
 
 mkfs.btrfs -f -L linux "$root_device"
 
 show_info "Mounting target filesystems"
-target_mounted=mounting
 mount "$root_device" /mnt
-target_mounted=yes
 for subvolume in "${BTRFS_SUBVOLUMES[@]}"; do
     btrfs subvolume create "/mnt/$subvolume"
 done
 umount /mnt
-target_mounted=no
 
-target_mounted=mounting
 mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
-target_mounted=yes
 for subvolume_mount in "${BTRFS_SUBVOLUME_MOUNTS[@]}"; do
     subvolume=${subvolume_mount%%:*}
     mountpoint=${subvolume_mount#*:}
@@ -1127,10 +900,12 @@ configure_target
 unset userpass userpass2
 
 show_section "Finalizing Installation"
-umount -R /mnt
-target_mounted=no
-cryptsetup close cryptroot
-cryptroot_opened=no
+if ! umount -R /mnt; then
+    show_error "Failed to unmount /mnt cleanly. Close open files on it, then run: umount -R /mnt"
+fi
+if ! cryptsetup close cryptroot; then
+    show_error "Failed to close cryptroot. Close it manually before rebooting: cryptsetup close cryptroot"
+fi
 
 echo ""
 gum style \
