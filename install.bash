@@ -787,14 +787,14 @@ preflight_validate_packages
 preflight_validate_rescue_uki
 
 wipe_mode=none
-if gum confirm "Securely wipe $target_disk with blkdiscard before partitioning? This is fast and intended for SSD/NVMe devices."; then
+if gum confirm "Discard all blocks on $target_disk with blkdiscard before partitioning? This is destructive but not guaranteed secure erasure."; then
     wipe_mode=discard
 fi
 
 show_section "Installation Summary"
 gum style --border rounded --border-foreground "$UI_ACCENT" --padding "1 2" --margin "0 2" \
     "Target disk:     $target_disk" \
-    "Secure wipe:     $wipe_mode" \
+    "Block discard:   $wipe_mode" \
     "Unlock method:   $unlock_method_label" \
     "Bluetooth off:   $disable_bluetooth" \
     "Thunderbolt off: $disable_thunderbolt" \
@@ -826,7 +826,6 @@ fi
 show_section "Disk Setup"
 if [[ "$wipe_mode" == "discard" ]]; then
     show_info "Discarding all blocks on $target_disk"
-    wipefs --all "$target_disk"
     blkdiscard -f "$target_disk"
     partprobe "$target_disk" || true
     udevadm settle || true

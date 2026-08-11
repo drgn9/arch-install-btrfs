@@ -144,7 +144,7 @@ Installer prompts:
 - Timezone.
 - User account and password.
 - Target disk.
-- Optional `blkdiscard` secure wipe for SSD/NVMe devices.
+- Optional whole-device `blkdiscard` for SSD/NVMe devices. This is destructive but not guaranteed secure erasure.
 
 LUKS unlock behavior:
 
