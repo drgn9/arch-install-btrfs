@@ -114,13 +114,14 @@ import_package() {
 download_verify_import_package() {
     local pkg=$1
     local version=$2
-    local file_version=${version#*:}
     local first=${pkg:0:1}
     local arch ext filename url outfile
 
+    # Archive filenames keep the epoch verbatim (e.g. mesa-1:25.1.4-1-...);
+    # a literal ':' is valid in a URL path.
     for arch in x86_64 any; do
         for ext in zst xz gz; do
-            filename="${pkg}-${file_version}-${arch}.pkg.tar.${ext}"
+            filename="${pkg}-${version}-${arch}.pkg.tar.${ext}"
             url="${ALA}/${first}/${pkg}/${filename}"
             outfile="${PKGDIR}/${filename}"
 

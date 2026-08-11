@@ -579,13 +579,13 @@ EOF
 
     case "$unlock_method" in
         tpm2)
-            printf 'cryptroot  UUID=%s  none  tpm2-device=auto,password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
+            printf 'cryptroot  UUID=%s  none  tpm2-device=auto,password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
             ;;
         fido2)
-            printf 'cryptroot  UUID=%s  none  fido2-device=auto,password-echo=no,x-systemd.device-timeout=30,timeout=0,no-read-workqueue,no-write-workqueue\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
+            printf 'cryptroot  UUID=%s  none  fido2-device=auto,password-echo=no,x-systemd.device-timeout=30,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
             ;;
         passphrase)
-            printf 'cryptroot  UUID=%s  none  password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
+            printf 'cryptroot  UUID=%s  none  password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
             ;;
     esac
     printf 'root=/dev/mapper/cryptroot\n' >/mnt/etc/cmdline.d/root.conf
@@ -601,6 +601,8 @@ EOF
 
     enable_target_service tailscaled.service
     enable_target_service pcscd.service
+    enable_target_service fstrim.timer
+    enable_target_service systemd-boot-update.service
 
     if ! target_chroot id -u "$username" &>/dev/null; then
         target_chroot useradd -m -G users,wheel -s /bin/bash "$username"
