@@ -307,7 +307,7 @@ What `rollback-root` does:
 3. Asks for confirmation.
 4. Runs `snapper -c root undochange PRE..POST`.
 5. Rebuilds UKIs with `mkinitcpio -P`.
-6. Signs and verifies UKIs when `sbctl` keys exist.
+6. Requires the `sbctl` keys, then signs and verifies UKIs.
 7. Offers to reboot.
 
 What it does not do:
@@ -497,7 +497,7 @@ Root replacement does this:
 10. Set the Btrfs default subvolume to the new `@`.
 11. Unmount the top-level volume and mount the restored `@` at `/mnt`.
 12. Rebuild UKIs with `mkinitcpio -P`.
-13. Sign and verify UKIs when `sbctl` keys exist.
+13. Require the `sbctl` keys, then sign and verify UKIs.
 14. Unmount everything and close LUKS if it was opened.
 15. Offer to reboot.
 
