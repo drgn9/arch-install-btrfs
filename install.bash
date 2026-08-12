@@ -219,53 +219,6 @@ setup_snapper_rollback() {
     target_chroot pacman -S --needed --noconfirm snap-pac
 }
 
-delete_boot_entries_by_label() {
-    local label=$1
-    local boot_num
-
-    while read -r boot_num; do
-        [[ -n "$boot_num" ]] || continue
-        target_chroot efibootmgr --bootnum "$boot_num" --delete-bootnum --unicode || true
-    done < <(target_chroot efibootmgr --unicode 2>/dev/null | awk -v label="$label" '
-        {
-            token = $1
-            if (token !~ /^Boot[0-9A-Fa-f]{4}\*?$/) next
-            line = $0
-            sub(/^Boot[0-9A-Fa-f]{4}\*?[ \t]+/, "", line)
-            sub(/\t.*$/, "", line)
-            if (line == label) { sub(/^Boot/, "", token); sub(/\*.*/, "", token); print token }
-        }')
-}
-
-manage_efi_boot_entries() {
-    local entries entry boot_num
-
-    show_section "EFI Boot Entries"
-    efibootmgr --unicode || true
-
-    while true; do
-        entries=$(efibootmgr --unicode 2>/dev/null | awk '$1 ~ /^Boot[0-9A-Fa-f]{4}\*?$/ { print }' || true)
-
-        if [[ -z "$entries" ]]; then
-            show_info "No EFI boot entries found"
-            break
-        fi
-
-        entry=$(printf 'Skip\n%s\n' "$entries" | gum choose --header "Select EFI boot entry to delete, or Skip:")
-
-        if [[ "$entry" == "Skip" ]]; then
-            break
-        fi
-
-        boot_num=$(awk '{ token = $1; if (token ~ /^Boot[0-9A-Fa-f]{4}\*?$/) { sub(/^Boot/, "", token); sub(/\*$/, "", token); print token } }' <<<"$entry")
-
-        if [[ -n "$boot_num" ]] && gum confirm "Delete EFI boot entry Boot$boot_num?"; then
-            efibootmgr --bootnum "$boot_num" --delete-bootnum --unicode
-            show_info "Deleted EFI boot entry Boot$boot_num"
-        fi
-    done
-}
-
 configure_target() {
     local firewall_profile
 
