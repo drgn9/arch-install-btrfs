@@ -413,16 +413,15 @@ EOF
         # Sign the systemd-boot source first so bootctl copies an already
         # signed binary to the ESP, and so future systemd updates re-sign it
         # via the sbctl pacman hook before systemd-boot-update copies it.
-        target_chroot sbctl sign -s \
-            -o /usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed \
-            /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+        sign_target_file /usr/lib/systemd/boot/efi/systemd-bootx64.efi \
+            /usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed
 
         target_chroot bootctl --esp-path=/efi --variables=no install
 
-        target_chroot sbctl sign -s /efi/EFI/systemd/systemd-bootx64.efi
-        target_chroot sbctl sign -s /efi/EFI/BOOT/BOOTX64.EFI
-        target_chroot sbctl sign -s /efi/EFI/Linux/arch-linux.efi
-        target_chroot sbctl sign -s "$RESCUE_UKI_TARGET"
+        sign_target_file /efi/EFI/systemd/systemd-bootx64.efi
+        sign_target_file /efi/EFI/BOOT/BOOTX64.EFI
+        sign_target_file /efi/EFI/Linux/arch-linux.efi
+        sign_target_file "$RESCUE_UKI_TARGET"
 
         delete_boot_entries_by_label "arch-linux"
         delete_boot_entries_by_label "arch-rescue"
@@ -435,7 +434,7 @@ EOF
             --unicode
 
         if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
-            target_chroot sbctl sign -s -o /usr/lib/fwupd/efi/fwupdx64.efi.signed /usr/lib/fwupd/efi/fwupdx64.efi
+            sign_target_file /usr/lib/fwupd/efi/fwupdx64.efi /usr/lib/fwupd/efi/fwupdx64.efi.signed
         fi
         target_chroot sbctl verify
         target_chroot sbctl status || true
