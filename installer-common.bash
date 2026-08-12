@@ -9,6 +9,7 @@ BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
 BTRFS_DATA_MOUNT_OPTIONS="$BTRFS_MOUNT_OPTIONS,nodev,nosuid"
 BTRFS_STRICT_MOUNT_OPTIONS="$BTRFS_DATA_MOUNT_OPTIONS,noexec"
 EFI_MOUNT_OPTIONS="fmask=0137,dmask=0027,nodev,nosuid,noexec"
+RESCUE_UKI_TARGET=/efi/EFI/Linux/arch-rescue.efi
 BTRFS_SUBVOLUMES=(
     @
     @snapshots
@@ -309,6 +310,200 @@ setup_snapper_rollback() {
     # Install snap-pac only after Snapper's root config and sibling
     # @snapshots mount are in place, so installer pacman work is not captured.
     target_chroot pacman -S --needed --noconfirm snap-pac
+}
+
+# Target configuration shared by fresh install and rescue reinstall. The
+# fresh-install-only steps (rescue UKI copy, LUKS token enrollment, Secure
+# Boot key creation/enrollment) stay in install.bash.
+configure_target_system() {
+    local firewall_profile
+
+    printf '%s\n' "$hostname" >/mnt/etc/hostname
+
+    write_target_file /etc/hosts 0644 <<EOF
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $hostname.localdomain   $hostname
+EOF
+
+    sed -i "/^#$locale/s/^#//" /mnt/etc/locale.gen
+    printf 'LANG=%s\n' "$locale" >/mnt/etc/locale.conf
+    printf 'KEYMAP=%s\n' "$kblayout" >/mnt/etc/vconsole.conf
+    ln -sf "/usr/share/zoneinfo/$timezone" /mnt/etc/localtime
+    target_chroot hwclock --systohc || show_warn "hwclock --systohc failed; set the hardware clock manually after install"
+    target_chroot locale-gen >/dev/null
+
+    install -d -m 0755 /mnt/etc/systemd/network
+    install -d -m 0755 /mnt/etc/systemd/system/systemd-networkd-wait-online.service.d
+    copy_settings_file network /etc/systemd/network/20-wired.network
+    copy_settings_file network /etc/systemd/system/systemd-networkd-wait-online.service.d/wait-for-only-one-interface.conf
+    copy_settings_file network /etc/systemd/networkd.conf
+
+    install -d -m 0755 /mnt/etc/iwd /mnt/etc/systemd/system/iwd.service.d
+    copy_settings_file network /etc/systemd/network/25-wireless.network
+    copy_settings_file network /etc/systemd/network/30-wireless.network
+    copy_settings_file network /etc/iwd/main.conf
+    copy_settings_file network /etc/systemd/system/iwd.service.d/override.conf
+    enable_target_service iwd.service
+
+    copy_settings_file network /etc/systemd/resolved.conf
+    enable_target_service systemd-networkd.service
+    enable_target_service systemd-resolved.service
+    enable_target_service systemd-timesyncd.service
+    enable_target_service systemd-networkd-wait-online.service
+
+    for firewall_profile in blackout drop general; do
+        copy_settings_file network "/usr/local/share/firewall-profiles/$firewall_profile.nft"
+        target_chroot nft --check --file "/usr/local/share/firewall-profiles/$firewall_profile.nft"
+    done
+    copy_settings_source network/usr/local/share/firewall-profiles/drop.nft /etc/nftables.conf
+    copy_settings_file network /usr/local/sbin/firewall-profile 0755
+    enable_target_service nftables.service
+
+    copy_settings_file network /etc/sysctl.d/99-firewall-settings.conf
+    copy_settings_file power /etc/sysctl.d/99-watchdog-settings.conf
+    copy_settings_file power /etc/sysctl.d/99-zram-settings.conf
+    copy_settings_file security /etc/sysctl.d/99-hardening.conf
+    copy_settings_file security /etc/modprobe.d/blacklist.conf
+    copy_settings_file security /etc/modprobe.d/disable-firewire.conf
+    copy_settings_file security /etc/modprobe.d/disable-intel-mei.conf
+    copy_settings_file hardware /etc/modprobe.d/iwlwifi.conf
+    copy_settings_file security /etc/modprobe.d/security-blacklist.conf
+    copy_settings_file security /etc/audit/auditd.conf
+    copy_settings_file security /etc/audit/rules.d/10-arch-base.rules
+    copy_settings_file security /etc/systemd/system.conf.d/60-disable-coredump.conf
+    copy_settings_file security /etc/systemd/user.conf.d/60-disable-coredump.conf
+    copy_settings_file security /etc/security/limits.d/60-disable-coredump.conf
+    copy_settings_file access /etc/polkit-1/rules.d/00-udisks-wheel.rules
+
+    install -d -m 0755 /mnt/etc/apparmor/earlypolicy
+    install -d -m 0755 /mnt/etc/apparmor.d/local
+    touch /mnt/etc/apparmor/parser.conf
+    append_settings_file security /etc/apparmor/parser.conf
+    enable_target_service apparmor.service
+    enable_target_service auditd.service
+
+    if [[ "$disable_bluetooth" == "yes" ]]; then
+        copy_settings_file hardware /etc/modprobe.d/disable-bluetooth.conf
+    fi
+
+    if [[ "$disable_thunderbolt" == "yes" ]]; then
+        copy_settings_file hardware /etc/modprobe.d/disable-thunderbolt.conf
+    fi
+
+    copy_settings_file hardware /etc/fwupd/fwupd.conf
+
+    copy_settings_file power /etc/systemd/zram-generator.conf
+
+    copy_settings_file power /etc/systemd/logind.conf.d/no-sleep.conf
+    copy_settings_file power /etc/systemd/sleep.conf.d/no-sleep.conf
+    mask_target_unit suspend.target
+    mask_target_unit hibernate.target
+    mask_target_unit hybrid-sleep.target
+    mask_target_unit suspend-then-hibernate.target
+
+    sed -Ei 's/^#(Color)$/\1\nILoveCandy/;s/^#(ParallelDownloads).*/\1 = 10/' /mnt/etc/pacman.conf
+
+    if target_chroot getent group polkitd >/dev/null; then
+        target_chroot chown root:polkitd /etc/polkit-1/rules.d
+        target_chroot chmod 0750 /etc/polkit-1/rules.d
+        target_chroot chown root:polkitd /etc/polkit-1/rules.d/00-udisks-wheel.rules
+        target_chroot chmod 0640 /etc/polkit-1/rules.d/00-udisks-wheel.rules
+    fi
+
+    install -d -m 0755 /mnt/boot /mnt/efi/EFI/Linux /mnt/efi/loader /mnt/etc/cmdline.d /mnt/etc/mkinitcpio.d
+    copy_settings_file boot /efi/loader/loader.conf
+
+    copy_settings_file boot /etc/cmdline.d/defaults.conf
+    copy_settings_file boot /etc/cmdline.d/security.conf
+    copy_settings_file boot /etc/cmdline.d/iommu.conf
+    copy_settings_file boot /etc/cmdline.d/filesystem.conf
+
+    if [[ "$cpu_vendor" != "AuthenticAMD" ]]; then
+        copy_settings_file boot /etc/cmdline.d/intel.conf
+    fi
+
+    copy_settings_file boot /etc/cmdline.d/lockdown.conf
+
+    case "$unlock_method" in
+        tpm2)
+            printf 'cryptroot  UUID=%s  none  tpm2-device=auto,password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
+            ;;
+        fido2)
+            printf 'cryptroot  UUID=%s  none  fido2-device=auto,password-echo=no,x-systemd.device-timeout=30,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
+            ;;
+        passphrase)
+            printf 'cryptroot  UUID=%s  none  password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
+            ;;
+    esac
+    printf 'root=/dev/mapper/cryptroot\n' >/mnt/etc/cmdline.d/root.conf
+    copy_settings_source boot/etc/mkinitcpio.conf.encrypted /etc/mkinitcpio.conf
+
+    copy_settings_file boot /etc/mkinitcpio.d/linux.preset
+
+    # Drop initramfs images generated by the stock presets during pacstrap;
+    # nothing references them once the UKI presets take over.
+    rm -f /mnt/boot/initramfs-*.img
+
+    target_chroot mkinitcpio -P
+
+    enable_target_service tailscaled.service
+    enable_target_service pcscd.service
+    enable_target_service fstrim.timer
+    enable_target_service systemd-boot-update.service
+
+    if ! target_chroot id -u "$username" &>/dev/null; then
+        target_chroot useradd -m -G users,wheel -s /bin/bash "$username"
+    else
+        target_chroot usermod -aG users,wheel "$username"
+    fi
+
+    printf '%s:%s\n' "$username" "$userpass" | target_chroot chpasswd
+
+    copy_settings_file access /etc/sudoers.d/wheel 0440
+
+    setup_snapper_rollback
+    target_chroot passwd -l root >/dev/null
+}
+
+install_and_sign_boot_manager() {
+    # Sign the systemd-boot source first so bootctl copies an already
+    # signed binary to the ESP, and so future systemd updates re-sign it
+    # via the sbctl pacman hook before systemd-boot-update copies it.
+    sign_target_file /usr/lib/systemd/boot/efi/systemd-bootx64.efi \
+        /usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed
+
+    target_chroot bootctl --esp-path=/efi --variables=no install
+
+    sign_target_file /efi/EFI/systemd/systemd-bootx64.efi
+    sign_target_file /efi/EFI/BOOT/BOOTX64.EFI
+    sign_target_file /efi/EFI/Linux/arch-linux.efi
+    if [[ -f "/mnt$RESCUE_UKI_TARGET" ]]; then
+        sign_target_file "$RESCUE_UKI_TARGET"
+    fi
+
+    delete_boot_entries_by_label "arch-linux"
+    delete_boot_entries_by_label "arch-rescue"
+    delete_boot_entries_by_label "Linux Boot Manager"
+    target_chroot efibootmgr --create \
+        --disk "$target_disk" \
+        --part 1 \
+        --label "Linux Boot Manager" \
+        --loader "\\EFI\\systemd\\systemd-bootx64.efi" \
+        --unicode
+
+    if [[ -f /mnt/usr/lib/fwupd/efi/fwupdx64.efi ]]; then
+        sign_target_file /usr/lib/fwupd/efi/fwupdx64.efi /usr/lib/fwupd/efi/fwupdx64.efi.signed
+    fi
+    target_chroot sbctl verify
+    target_chroot sbctl status || true
+}
+
+finalize_target_dns() {
+    # Deferred to the end: the chroot steps above need working DNS, which the
+    # live environment provides by bind-mounting its resolv.conf over a
+    # regular file. Only now hand resolution over to systemd-resolved.
+    ln -sf /run/systemd/resolve/stub-resolv.conf /mnt/etc/resolv.conf
 }
 
 delete_boot_entries_by_label() {
