@@ -22,14 +22,6 @@ if [[ ! -d /sys/firmware/efi/efivars ]]; then
     exit 1
 fi
 
-have_network() {
-    if command -v curl &>/dev/null; then
-        curl --silent --max-time 5 https://archlinux.org >/dev/null 2>&1
-    else
-        ping -c 1 -W 5 archlinux.org &>/dev/null
-    fi
-}
-
 connect_wifi_tui() {
     local attempt
 
@@ -187,48 +179,6 @@ validate_disk_target() {
     fi
 }
 
-partition_path() {
-    local disk=$1
-    local number=$2
-
-    if [[ "$disk" =~ [0-9]$ ]]; then
-        printf '%sp%s\n' "$disk" "$number"
-    else
-        printf '%s%s\n' "$disk" "$number"
-    fi
-}
-
-detect_microcode() {
-    cpu_vendor=$(grep -m1 vendor_id /proc/cpuinfo | awk '{print $3}')
-    if [[ "$cpu_vendor" == "AuthenticAMD" ]]; then
-        microcode="amd-ucode"
-    else
-        microcode="intel-ucode"
-    fi
-}
-
-detect_gpu_package_files() {
-    local gpu_info
-
-    gpu_info=$(lspci | grep -E "VGA|3D" || true)
-    gpu_package_files=()
-    gpu_label="none"
-
-    if grep -qi intel <<<"$gpu_info"; then
-        gpu_package_files+=(packages/desktop-driver-intel.conf)
-        gpu_label="Intel"
-    fi
-
-    if grep -qi amd <<<"$gpu_info"; then
-        gpu_package_files+=(packages/desktop-driver-amd.conf)
-        if [[ "$gpu_label" == "Intel" ]]; then
-            gpu_label="Intel + AMD"
-        else
-            gpu_label="AMD"
-        fi
-    fi
-}
-
 collect_selected_packages() {
     local file
 
@@ -360,22 +310,6 @@ append_unique_lines() {
         [[ -n "$line" ]] || continue
         grep -qxF "$line" "/mnt$target" || printf '%s\n' "$line" >>"/mnt$target"
     done <"$source"
-}
-
-btrfs_mount_options_for() {
-    local mountpoint=$1
-
-    case "$mountpoint" in
-        /.snapshots|/var/log|/var/cache|/var/lib/sbctl|/var/lib/iwd|/var/lib/tailscale|/var/lib/netbird)
-            printf '%s\n' "$BTRFS_STRICT_MOUNT_OPTIONS"
-            ;;
-        /home|/root|/var/tmp|/srv)
-            printf '%s\n' "$BTRFS_DATA_MOUNT_OPTIONS"
-            ;;
-        *)
-            printf '%s\n' "$BTRFS_MOUNT_OPTIONS"
-            ;;
-    esac
 }
 
 delete_boot_entries_by_label() {
