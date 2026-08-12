@@ -608,6 +608,16 @@ choose_home_disposition() {
     fi
 }
 
+verify_home_ownership() {
+    local expected actual
+
+    expected="$(target_chroot id -u "$username"):$(target_chroot id -g "$username")"
+    actual=$(stat -c '%u:%g' "/mnt/home/$username" 2>/dev/null || echo missing)
+    if [[ "$actual" != "$expected" ]]; then
+        show_warn "/home/$username is owned by $actual, expected $expected. Fix after boot with: chown -R $expected /home/$username"
+    fi
+}
+
 # The reinstalled system must unlock with what the LUKS2 header actually
 # contains; a wrong crypttab.initramfs on a token-only system is unbootable,
 # so the method is detected, never freely chosen.
@@ -728,7 +738,27 @@ reinstall_preserving_state() {
     mount_target_layout
     mounted=yes
 
-    die 'Reinstall is not implemented beyond subvolume recreation yet. DO NOT run this action on a real system; the previous root was retained but no new OS was installed.'
+    detect_microcode
+    show_section "Base System"
+    show_info 'Installing base system with pacstrap'
+    pacstrap -K /mnt \
+        base base-devel linux linux-headers "$microcode" linux-firmware
+
+    show_info 'Generating fstab'
+    genfstab -U /mnt >/mnt/etc/fstab
+
+    root_uuid=$(blkid -s UUID -o value "$root_part")
+
+    show_section "Package Installation"
+    install_selected_packages
+
+    show_section "System Configuration"
+    show_info 'Configuring target system'
+    configure_target_system
+    verify_home_ownership
+    unset userpass userpass2
+
+    die 'Reinstall is not implemented beyond target configuration yet. DO NOT run this action on a real system; boot files are not signed.'
 }
 
 if [[ ${EUID:-0} -ne 0 ]]; then
