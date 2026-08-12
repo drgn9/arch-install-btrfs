@@ -253,6 +253,21 @@ default_subvolume_id() {
     btrfs subvolume get-default "$1" | awk '$1 == "ID" { print $2; exit }'
 }
 
+# Deletes a subvolume and any child subvolumes beneath it (snapper snapshots
+# under @snapshots, container-created subvolumes under @docker/@containers).
+# A child always sorts after its parent lexicographically, so reverse order
+# deletes children first. Paths are relative to the top-level mount at /mnt.
+delete_subvolume_tree() {
+    local subvolume=$1
+    local child
+
+    while IFS= read -r child; do
+        btrfs subvolume delete "/mnt/$child"
+    done < <(btrfs subvolume list /mnt | sed -n 's/.* path //p' | \
+        awk -v prefix="$subvolume/" 'index($0, prefix) == 1' | sort -r)
+    btrfs subvolume delete "/mnt/$subvolume"
+}
+
 sign_and_verify_ukis() {
     local root=$1
 
@@ -679,7 +694,41 @@ reinstall_preserving_state() {
         "Partition table, ESP, LUKS container, and Secure Boot keys are kept."
     confirm 'Retire the current root and reinstall?' || die 'Reinstall cancelled; nothing was changed.'
 
-    die 'Reinstall is not implemented beyond preflight yet; nothing was changed.'
+    show_section "Retiring Current Root"
+    local timestamp old_root new_root_id
+    timestamp=$(date +%Y%m%d-%H%M%S)
+    old_root="@old-reinstall-$timestamp"
+    [[ ! -e "/mnt/$old_root" ]] || die "Subvolume $old_root already exists."
+
+    show_info "Renaming @ to $old_root"
+    mv -T -- /mnt/@ "/mnt/$old_root"
+    retired_root=$old_root
+
+    for subvolume in "${effective_recreate[@]}"; do
+        [[ "$subvolume" != @ ]] || continue
+        if [[ -d "/mnt/$subvolume" ]]; then
+            show_info "Deleting $subvolume"
+            delete_subvolume_tree "$subvolume"
+        fi
+    done
+
+    show_section "Recreating Subvolumes"
+    for subvolume in "${effective_recreate[@]}"; do
+        btrfs subvolume create "/mnt/$subvolume"
+    done
+
+    new_root_id=$(subvolume_id /mnt/@)
+    [[ "$new_root_id" =~ ^[0-9]+$ ]] || die 'Could not identify the new root subvolume.'
+    btrfs subvolume set-default "$new_root_id" /mnt
+
+    umount /mnt
+    top_mounted=no
+
+    show_section "Mounting Target Layout"
+    mount_target_layout
+    mounted=yes
+
+    die 'Reinstall is not implemented beyond subvolume recreation yet. DO NOT run this action on a real system; the previous root was retained but no new OS was installed.'
 }
 
 if [[ ${EUID:-0} -ne 0 ]]; then
