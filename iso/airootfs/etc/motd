@@ -5,13 +5,10 @@ To begin the guided installation, type:
 
     install-arch
 
-To repair an existing installation or replace @ from a Snapper snapshot, type:
+To repair an existing installation, replace @ from a Snapper snapshot,
+or check package integrity, type:
 
     rescue-root
-
-To verify official package files on a read-only mounted installation, type:
-
-    trusted-paccheck
 
 The installer checks for internet access first and opens impala
 for Wi-Fi setup if needed.

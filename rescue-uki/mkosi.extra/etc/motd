@@ -1,5 +1,7 @@
 Arch Rescue
 
 Guided recovery: rescue-root
-Package check:   trusted-paccheck
-Wi-Fi:          impala
+  - repair installed system
+  - restore root from snapshot
+  - check package integrity
+Wi-Fi:           impala

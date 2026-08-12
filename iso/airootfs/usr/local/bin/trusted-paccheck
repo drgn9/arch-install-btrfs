@@ -58,8 +58,11 @@ mount_opts=$(findmnt -n -o OPTIONS --target "$TARGET")
 if [[ ",$mount_opts," != *,ro,* ]]; then
     die "$TARGET is not mounted read-only."
 fi
-if [[ ",$mount_opts," != *,nologreplay,* && ",$mount_opts," != *,norecovery,* ]]; then
-    die "$TARGET is not mounted with nologreplay; refusing a check that may replay the Btrfs tree log."
+# Standalone nologreplay was removed in kernel 6.16; the kernel reports the
+# active option as rescue=nologreplay (first in the rescue group) regardless
+# of the spelling used at mount time, including the norecovery alias.
+if [[ ",$mount_opts," != *,rescue=nologreplay,* && ",$mount_opts," != *,rescue=nologreplay:* ]]; then
+    die "$TARGET is not mounted with rescue=nologreplay; refusing a check that may replay the Btrfs tree log."
 fi
 
 [[ -d "$TARGET/var/lib/pacman/local" ]] || die "$TARGET/var/lib/pacman/local does not exist."

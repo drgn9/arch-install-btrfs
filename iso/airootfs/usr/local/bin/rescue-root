@@ -196,8 +196,8 @@ check_package_integrity() {
 
     select_target
 
-    show_info 'Mounting the installed system read-only with nologreplay'
-    mount -o "ro,nologreplay,$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
+    show_info 'Mounting the installed system read-only with rescue=nologreplay'
+    mount -o "ro,rescue=nologreplay,$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
     mounted=yes
 
     result=0
