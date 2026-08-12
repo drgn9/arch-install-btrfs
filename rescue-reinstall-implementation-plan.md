@@ -298,14 +298,14 @@ Update `README.md` only after the behavior exists; it remains the source of trut
 Run after each significant phase:
 
 ```bash
-bash -n install.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch iso/airootfs/usr/local/bin/trusted-paccheck settings/rollback/usr/local/sbin/rollback-root settings/network/usr/local/sbin/firewall-profile
+bash -n install.bash installer-common.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch iso/airootfs/usr/local/bin/trusted-paccheck settings/rollback/usr/local/sbin/rollback-root settings/network/usr/local/sbin/firewall-profile
 ```
 
 ```bash
-shellcheck install.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch iso/airootfs/usr/local/bin/trusted-paccheck settings/rollback/usr/local/sbin/rollback-root settings/network/usr/local/sbin/firewall-profile
+shellcheck -x install.bash installer-common.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch iso/airootfs/usr/local/bin/trusted-paccheck settings/rollback/usr/local/sbin/rollback-root settings/network/usr/local/sbin/firewall-profile
 ```
 
-Add `installer-common.bash` to both lists as soon as it exists.
+`shellcheck -x` follows the `source` of `installer-common.bash` for cross-file analysis.
 
 ```bash
 git diff --check

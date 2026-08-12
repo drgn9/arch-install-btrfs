@@ -7,51 +7,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETTINGS_DIR="$SCRIPT_DIR/settings"
 RESCUE_UKI_SOURCE="$SCRIPT_DIR/artifacts/arch-rescue.efi"
 RESCUE_UKI_TARGET=/efi/EFI/Linux/arch-rescue.efi
-BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
-BTRFS_DATA_MOUNT_OPTIONS="$BTRFS_MOUNT_OPTIONS,nodev,nosuid"
-BTRFS_STRICT_MOUNT_OPTIONS="$BTRFS_DATA_MOUNT_OPTIONS,noexec"
-EFI_MOUNT_OPTIONS="fmask=0137,dmask=0027,nodev,nosuid,noexec"
-BTRFS_SUBVOLUMES=(
-    @
-    @snapshots
-    @home
-    @root
-    @var_log
-    @var_cache
-    @var_tmp
-    @docker
-    @containerd
-    @containers
-    @machines
-    @portables
-    @flatpak
-    @libvirt
-    @sbctl
-    @iwd
-    @tailscale
-    @netbird
-    @srv
-)
-BTRFS_SUBVOLUME_MOUNTS=(
-    "@snapshots:/.snapshots"
-    "@home:/home"
-    "@root:/root"
-    "@var_log:/var/log"
-    "@var_cache:/var/cache"
-    "@var_tmp:/var/tmp"
-    "@docker:/var/lib/docker"
-    "@containerd:/var/lib/containerd"
-    "@containers:/var/lib/containers"
-    "@machines:/var/lib/machines"
-    "@portables:/var/lib/portables"
-    "@flatpak:/var/lib/flatpak"
-    "@libvirt:/var/lib/libvirt"
-    "@sbctl:/var/lib/sbctl"
-    "@iwd:/var/lib/iwd"
-    "@tailscale:/var/lib/tailscale"
-    "@netbird:/var/lib/netbird"
-    "@srv:/srv"
-)
+
+# shellcheck source=installer-common.bash
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/installer-common.bash"
 
 if [[ ${EUID:-0} -ne 0 ]]; then
     echo "ERROR: This script must be run as root." >&2
