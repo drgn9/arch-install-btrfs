@@ -126,6 +126,69 @@ detect_gpu_package_files() {
     fi
 }
 
+target_chroot() {
+    arch-chroot /mnt "$@"
+}
+
+copy_settings_file() {
+    local subsystem=$1
+    local target=$2
+    local mode=${3:-0644}
+
+    copy_settings_source "$subsystem/${target#/}" "$target" "$mode"
+}
+
+copy_settings_source() {
+    local source=$1
+    local target=$2
+    local mode=${3:-0644}
+
+    install -D -m "$mode" "$SETTINGS_DIR/$source" "/mnt$target"
+}
+
+append_settings_file() {
+    local subsystem=$1
+    local target=$2
+
+    install -d -m 0755 "$(dirname "/mnt$target")"
+    touch "/mnt$target"
+    append_unique_lines "$SETTINGS_DIR/$subsystem/${target#/}" "$target"
+}
+
+enable_target_service() {
+    local output
+
+    if ! output=$(systemctl --root=/mnt enable "$1" 2>&1); then
+        show_error "Failed to enable $1: $output"
+        return 1
+    fi
+}
+
+mask_target_unit() {
+    systemctl --root=/mnt mask "$1" &>/dev/null || true
+}
+
+write_target_file() {
+    local path=$1
+    local mode=$2
+    local tmp
+
+    tmp=$(mktemp)
+    cat >"$tmp"
+    install -D -m "$mode" "$tmp" "/mnt$path"
+    rm -f "$tmp"
+}
+
+append_unique_lines() {
+    local source=$1
+    local target=$2
+
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        grep -qxF "$line" "/mnt$target" || printf '%s\n' "$line" >>"/mnt$target"
+    done <"$source"
+}
+
 collect_selected_packages() {
     local file
 
