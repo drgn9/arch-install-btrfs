@@ -758,7 +758,38 @@ reinstall_preserving_state() {
     verify_home_ownership
     unset userpass userpass2
 
-    die 'Reinstall is not implemented beyond target configuration yet. DO NOT run this action on a real system; boot files are not signed.'
+    # No sbctl create-keys or enroll-keys: the preserved @sbctl keys sign
+    # everything, which is what makes reinstall work without Setup Mode.
+    show_section "Secure Boot"
+    install_and_sign_boot_manager
+    finalize_target_dns
+
+    show_section "Finalizing Reinstall"
+    trap '' INT TERM
+    if ! umount -R /mnt; then
+        die "Failed to unmount /mnt cleanly. Close open files, then run: umount -R /mnt; cryptsetup close cryptroot. The previous root is retained as $old_root."
+    fi
+    mounted=no
+    top_mounted=no
+    if [[ "$opened_luks" == yes ]]; then
+        if ! cryptsetup close cryptroot; then
+            die "Failed to close cryptroot; close it manually before rebooting: cryptsetup close cryptroot. The previous root is retained as $old_root."
+        fi
+        opened_luks=no
+    fi
+    trap 'exit 130' INT TERM
+    cleanup_enabled=no
+    retired_root=
+
+    show_success "Reinstall complete."
+    show_action "OLD ROOT RETAINED" \
+        "$old_root" \
+        "Keep it until the reinstalled system is verified." \
+        "Delete it later with Btrfs Assistant or btrfs subvolume delete."
+
+    if confirm 'Reboot now?'; then
+        systemctl reboot
+    fi
 }
 
 if [[ ${EUID:-0} -ne 0 ]]; then
