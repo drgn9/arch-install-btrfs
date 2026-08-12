@@ -187,38 +187,6 @@ preflight_validate_rescue_uki() {
     fi
 }
 
-install_selected_packages() {
-    show_info "Installing ${#selected_packages[@]} packages into the target"
-    target_chroot pacman -S --needed --noconfirm "${selected_packages[@]}"
-}
-
-setup_snapper_rollback() {
-    show_info "Configuring Snapper rollback"
-
-    umount /mnt/.snapshots
-    rmdir /mnt/.snapshots
-    target_chroot snapper --no-dbus -c root create-config /
-    target_chroot btrfs subvolume delete /.snapshots
-
-    install -d -m 0750 /mnt/.snapshots
-    mount -o "$(btrfs_mount_options_for /.snapshots),subvol=@snapshots" "$root_device" /mnt/.snapshots
-    chmod 0750 /mnt/.snapshots
-
-    target_chroot snapper --no-dbus -c root set-config \
-        TIMELINE_CREATE=no \
-        TIMELINE_CLEANUP=no \
-        NUMBER_CLEANUP=no \
-        EMPTY_PRE_POST_CLEANUP=no
-    systemctl --root=/mnt disable snapper-timeline.timer
-    target_chroot snapper --no-dbus -c root get-config >/dev/null
-
-    copy_settings_file rollback /usr/local/sbin/rollback-root 0755
-
-    # Install snap-pac only after Snapper's root config and sibling
-    # @snapshots mount are in place, so installer pacman work is not captured.
-    target_chroot pacman -S --needed --noconfirm snap-pac
-}
-
 configure_target() {
     local firewall_profile
 
@@ -619,18 +587,7 @@ for subvolume in "${BTRFS_SUBVOLUMES[@]}"; do
 done
 umount /mnt
 
-mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
-for subvolume_mount in "${BTRFS_SUBVOLUME_MOUNTS[@]}"; do
-    subvolume=${subvolume_mount%%:*}
-    mountpoint=${subvolume_mount#*:}
-    mount_options=$(btrfs_mount_options_for "$mountpoint")
-    install -d -m 0755 "/mnt$mountpoint"
-    mount -o "$mount_options,subvol=$subvolume" "$root_device" "/mnt$mountpoint"
-done
-chmod 0700 /mnt/root
-chmod 1777 /mnt/var/tmp
-install -d -m 0755 /mnt/efi
-mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" /mnt/efi
+mount_target_layout
 
 detect_microcode
 show_section "Base System"
