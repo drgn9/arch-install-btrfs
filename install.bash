@@ -179,36 +179,6 @@ validate_disk_target() {
     fi
 }
 
-collect_selected_packages() {
-    local file
-
-    selected_package_files=(packages/base.conf packages/desktop-base.conf packages/desktop-niri.conf)
-    selected_package_files+=("${gpu_package_files[@]}")
-
-    for file in "${selected_package_files[@]}"; do
-        if [[ ! -f "$SCRIPT_DIR/$file" ]]; then
-            show_error "Missing package file: $SCRIPT_DIR/$file"
-            exit 1
-        fi
-    done
-
-    mapfile -t selected_packages < <(awk 'NF && $1 !~ /^#/ { print $1 }' "${selected_package_files[@]/#/$SCRIPT_DIR/}" | sort -u)
-    if (( ${#selected_packages[@]} == 0 )); then
-        show_error "No packages found in: ${selected_package_files[*]}"
-        exit 1
-    fi
-}
-
-preflight_validate_packages() {
-    local packages=("${selected_packages[@]}" snap-pac)
-
-    show_info "Validating ${#packages[@]} package names from: ${selected_package_files[*]} plus deferred snap-pac"
-    if ! pacman -Sp --print-format '%n' "${packages[@]}" >/dev/null; then
-        show_error "Unresolvable package names found. Fix the package files and re-run."
-        exit 1
-    fi
-}
-
 preflight_validate_rescue_uki() {
     if [[ ! -f "$RESCUE_UKI_SOURCE" ]]; then
         show_error "Missing rescue UKI artifact: $RESCUE_UKI_SOURCE"
