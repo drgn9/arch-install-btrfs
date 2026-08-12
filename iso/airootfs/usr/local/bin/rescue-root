@@ -15,6 +15,7 @@ mounted=no
 top_mounted=no
 cleanup_enabled=yes
 temporary_esp_mount=
+retired_root=
 UI_ACCENT=212
 UI_ACTION=214
 UI_SUCCESS=82
@@ -53,6 +54,10 @@ show_warn() {
     gum log --level warn "$1"
 }
 
+show_error() {
+    gum log --level error "$1"
+}
+
 show_success() {
     gum style --foreground "$UI_SUCCESS" --bold --margin "1 2" "$1"
 }
@@ -83,6 +88,9 @@ cleanup_on_failure() {
     fi
     if [[ "$opened_luks" == yes ]]; then
         cryptsetup close cryptroot 2>/dev/null || true
+    fi
+    if [[ -n "$retired_root" ]]; then
+        gum log --level warn "The previous root is retained as $retired_root. Re-running the reinstall action is safe."
     fi
 }
 trap 'cleanup_on_failure "$?"' EXIT
@@ -469,6 +477,211 @@ replace_root_from_snapshot() {
     fi
 }
 
+# --- Rescue reinstall -------------------------------------------------------
+
+# The payload is embedded at /usr/local/share/arch-new-install in the rescue
+# UKI and at /root/arch-new-install on the live ISO.
+resolve_payload_dir() {
+    local candidate
+
+    for candidate in /usr/local/share/arch-new-install /root/arch-new-install; do
+        if [[ -f "$candidate/installer-common.bash" ]]; then
+            payload_dir=$candidate
+            return 0
+        fi
+    done
+    die 'Rescue installer payload not found. Rebuild the rescue image with ./iso/build.sh; reinstall needs the embedded packages, settings, and installer-common.bash.'
+}
+
+preflight_verify_layout() {
+    local subvolume
+    local -a missing=()
+
+    for subvolume in @ @home "${BTRFS_PRESERVE_SUBVOLUMES[@]}"; do
+        [[ -d "/mnt/$subvolume" ]] || missing+=("$subvolume")
+    done
+    if (( ${#missing[@]} > 0 )); then
+        die "Missing subvolumes: ${missing[*]}. This is not a system created by this installer; reinstall supports only installer-created layouts."
+    fi
+
+    if [[ ! -d /mnt/@sbctl/keys ]] || [[ -z "$(ls -A /mnt/@sbctl/keys 2>/dev/null)" ]]; then
+        die '@sbctl contains no Secure Boot key material; new UKIs could not be signed. Reinstall requires the preserved sbctl keys.'
+    fi
+}
+
+preflight_verify_esp() {
+    local esp_probe
+
+    esp_probe=$(mktemp -d /run/arch-rescue-esp-probe.XXXXXX)
+    if ! mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" "$esp_probe"; then
+        rmdir "$esp_probe"
+        die "Could not mount the ESP $efi_part."
+    fi
+    if ! umount "$esp_probe"; then
+        die "Could not unmount the ESP probe at $esp_probe."
+    fi
+    rmdir "$esp_probe"
+}
+
+prompt_reinstall_settings() {
+    kblayout=us
+    locale=en_US.UTF-8
+
+    show_section "Hostname"
+    while true; do
+        hostname=$(gum input --header "Enter hostname:" --placeholder "archlinux" --char-limit 63)
+        [[ -n "$hostname" ]] || { show_error "You need to enter a hostname"; continue; }
+        [[ "$hostname" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] || { show_error "Invalid hostname"; continue; }
+        break
+    done
+
+    show_section "Timezone"
+    tz_region=$(find /usr/share/zoneinfo -maxdepth 1 -type d \
+        -not -name 'zoneinfo' -not -name 'posix' -not -name 'right' \
+        -printf '%f\n' 2>/dev/null | sort | \
+        gum filter --header "Select region:" --placeholder "Search region..." --height 15)
+    tz_city=$(find "/usr/share/zoneinfo/$tz_region" -type f -printf '%P\n' 2>/dev/null | sort | \
+        gum filter --header "Select city:" --placeholder "Search city..." --height 15)
+    timezone="$tz_region/$tz_city"
+
+    show_section "Hardware"
+    if gum confirm "Disable Bluetooth?"; then
+        disable_bluetooth=yes
+    else
+        disable_bluetooth=no
+    fi
+
+    if gum confirm "Disable Thunderbolt?"; then
+        disable_thunderbolt=yes
+    else
+        disable_thunderbolt=no
+    fi
+
+    show_section "User Account"
+    while true; do
+        username=$(gum input --header "Enter username:" --placeholder "user")
+        [[ -n "$username" ]] || { show_error "You need to enter a username"; continue; }
+        [[ "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { show_error "Invalid username"; continue; }
+        [[ "$username" != root ]] || { show_error "root cannot be used as the regular account"; continue; }
+        break
+    done
+
+    while true; do
+        userpass=$(gum input --password --header "Enter password for $username:")
+        [[ -n "$userpass" ]] || { show_error "You need to enter a password"; continue; }
+        userpass2=$(gum input --password --header "Confirm password for $username:")
+        [[ "$userpass" == "$userpass2" ]] || { show_error "Passwords do not match"; continue; }
+        break
+    done
+}
+
+choose_home_disposition() {
+    local home_choice confirmation
+
+    show_section "Home Subvolume"
+    erase_home=no
+    home_choice=$(gum choose --header 'What should happen to @home (user data)?' \
+        'Preserve @home (keep all user data)' \
+        'Erase @home (destroy all user data)')
+    if [[ "$home_choice" == Erase* ]]; then
+        show_action "DESTRUCTIVE: ERASE @home" \
+            "All user data in /home will be destroyed." \
+            "There is no retained copy and no undo."
+        confirmation=$(gum input --header 'Type ERASE to confirm erasing @home:' --placeholder 'ERASE')
+        [[ "$confirmation" == ERASE ]] || die '@home erase was not confirmed; nothing was changed.'
+        erase_home=yes
+    fi
+}
+
+# The reinstalled system must unlock with what the LUKS2 header actually
+# contains; a wrong crypttab.initramfs on a token-only system is unbootable,
+# so the method is detected, never freely chosen.
+detect_enrolled_unlock_method() {
+    local luks_dump chosen
+    local -a token_types
+
+    show_section "Boot Unlock Method"
+    luks_dump=$(cryptsetup luksDump "$root_part") || die "Could not read the LUKS header on $root_part."
+    mapfile -t token_types < <(grep -oE 'systemd-(tpm2|fido2)' <<<"$luks_dump" | sort -u)
+
+    case "${#token_types[@]}" in
+        0)
+            unlock_method=passphrase
+            show_info 'No TPM2 or FIDO2 tokens are enrolled; boot unlock uses the passphrase.'
+            ;;
+        1)
+            [[ "${token_types[0]}" == systemd-tpm2 ]] && unlock_method=tpm2 || unlock_method=fido2
+            show_info "Detected enrolled LUKS unlock method: $unlock_method"
+            ;;
+        *)
+            chosen=$(printf '%s\n' "${token_types[@]}" | gum choose --header 'Multiple token types are enrolled. Select the boot unlock method:')
+            [[ "$chosen" == systemd-tpm2 ]] && unlock_method=tpm2 || unlock_method=fido2
+            ;;
+    esac
+    confirm "Generate boot unlock config (crypttab.initramfs) for: $unlock_method?" || die 'Reinstall cancelled; nothing was changed.'
+}
+
+reinstall_preserving_state() {
+    local payload_version subvolume
+
+    show_section "Reinstall OS Preserving Selected State"
+    resolve_payload_dir
+    payload_version=$(head -n 1 "$payload_dir/payload-version" 2>/dev/null || true)
+    show_info "Embedded installer payload: ${payload_version:-unknown version}"
+    show_warn 'The embedded packages and settings are frozen at image build time; rebuild the ISO to refresh them.'
+
+    SCRIPT_DIR=$payload_dir
+    SETTINGS_DIR=$payload_dir/settings
+    # shellcheck source=installer-common.bash
+    # shellcheck disable=SC1091
+    source "$payload_dir/installer-common.bash"
+
+    select_target
+
+    mount -o "$BTRFS_MOUNT_OPTIONS,subvolid=5" "$root_device" /mnt
+    top_mounted=yes
+
+    show_section "Reinstall Preflight"
+    preflight_verify_layout
+    preflight_verify_esp
+
+    show_info 'Checking network reachability'
+    have_network || die 'No internet access. Connect first (Wi-Fi: run impala), then re-run this action.'
+
+    # The rescue image keyring is frozen at build time; a stale keyring is
+    # the most likely pacstrap failure, so refresh it before anything
+    # destructive happens.
+    show_info 'Refreshing archlinux-keyring in the rescue environment'
+    pacman -Sy --needed --noconfirm archlinux-keyring
+
+    detect_gpu_package_files
+    show_info "GPU driver selection: $gpu_label"
+    collect_selected_packages
+    preflight_validate_packages
+
+    prompt_reinstall_settings
+    choose_home_disposition
+    detect_enrolled_unlock_method
+
+    local -a effective_preserve effective_recreate
+    effective_preserve=("${BTRFS_PRESERVE_SUBVOLUMES[@]}")
+    effective_recreate=("${BTRFS_RECREATE_SUBVOLUMES[@]}")
+    if [[ "$erase_home" == yes ]]; then
+        effective_recreate+=(@home)
+    else
+        effective_preserve+=(@home)
+    fi
+
+    show_action "CONFIRM REINSTALL" \
+        "Preserved:  ${effective_preserve[*]}" \
+        "Recreated:  ${effective_recreate[*]}" \
+        "The current root is retained as @old-reinstall-<timestamp>." \
+        "Partition table, ESP, LUKS container, and Secure Boot keys are kept."
+    confirm 'Retire the current root and reinstall?' || die 'Reinstall cancelled; nothing was changed.'
+
+    die 'Reinstall is not implemented beyond preflight yet; nothing was changed.'
+}
+
 if [[ ${EUID:-0} -ne 0 ]]; then
     die 'This script must be run as root.'
 fi
@@ -478,10 +691,12 @@ show_section "Choose Rescue Action"
 action=$(gum choose --header 'What do you need to do?' \
     'Repair installed system' \
     'Restore root from snapshot' \
-    'Check package integrity')
+    'Check package integrity' \
+    'Reinstall OS preserving selected state')
 
 case "$action" in
     'Repair installed system') mount_for_repair ;;
     'Restore root from snapshot') replace_root_from_snapshot ;;
     'Check package integrity') check_package_integrity ;;
+    'Reinstall OS preserving selected state') reinstall_preserving_state ;;
 esac
