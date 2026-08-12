@@ -70,7 +70,7 @@ These Btrfs subvolumes are replaced. `@` is renamed aside and retained until the
 - [x] Add `iptables` to `rescue-uki/mkosi.conf` and `iso/packages.x86_64` to avoid the `libxtables.so` provider prompt.
 - [ ] Do not add `git`; V2 should not require cloning the installer during rescue.
 - [ ] Do not add `mkosi`, `archiso`, or `openssl`; those are build-time tools, not rescue reinstall runtime tools.
-- [ ] Confirm `mkosi -C rescue-uki --no-pager summary` still succeeds.
+- [x] Confirm `mkosi -C rescue-uki --no-pager summary` still succeeds.
 
 ## Phase 2: Rescue Installer Payload
 
@@ -98,40 +98,40 @@ installer-common.bash
 
 Refactor discipline: every move in this phase is a verbatim cut-and-paste whose correctness is reviewable from the diff alone. No behavior changes, renames, or improvements mixed into move commits. Watch `set -e` semantics: a function moved from a top-level call site to a conditional call site (or vice versa) changes error behavior.
 
-- [ ] Move `BTRFS_MOUNT_OPTIONS` into `installer-common.bash`.
-- [ ] Move `BTRFS_SUBVOLUMES` into `installer-common.bash`.
-- [ ] Move `BTRFS_SUBVOLUME_MOUNTS` into `installer-common.bash`.
-- [ ] Add `BTRFS_PRESERVE_SUBVOLUMES` for the always-preserve set (`@sbctl @iwd @tailscale @netbird`); `@home` is not in either fixed set because it is the only runtime choice, and reinstall logic handles it explicitly.
-- [ ] Add `BTRFS_RECREATE_SUBVOLUMES` for the fixed recreate set.
-- [ ] Move `partition_path` into `installer-common.bash`.
-- [ ] Move `have_network` into `installer-common.bash`; the reinstall preflight uses it.
-- [ ] Move package-file collection into `installer-common.bash`.
-- [ ] Move package-name validation into `installer-common.bash`.
-- [ ] Keep deferred `snap-pac` validation behavior in shared package validation.
-- [ ] Move `target_chroot` into `installer-common.bash`.
-- [ ] Move settings copy helpers into `installer-common.bash`.
-- [ ] Move `append_unique_lines` into `installer-common.bash`.
-- [ ] Move systemd enable/mask helpers into `installer-common.bash`.
-- [ ] Move EFI boot-entry deletion by exact label into `installer-common.bash`.
-- [ ] Move optional EFI/NVRAM cleanup prompt into `installer-common.bash`.
-- [ ] Move UKI/fwupd signing helpers into `installer-common.bash`, including the JSON signature-verification helper (`sbctl --json verify` + `jq`); plain `sbctl verify` exits 0 even for unsigned files, so the JSON check is the only enforceable verification.
-- [ ] Move GPU detection into `installer-common.bash`.
-- [ ] Move microcode detection into `installer-common.bash`.
+- [x] Move `BTRFS_MOUNT_OPTIONS` into `installer-common.bash`.
+- [x] Move `BTRFS_SUBVOLUMES` into `installer-common.bash`.
+- [x] Move `BTRFS_SUBVOLUME_MOUNTS` into `installer-common.bash`.
+- [x] Add `BTRFS_PRESERVE_SUBVOLUMES` for the always-preserve set (`@sbctl @iwd @tailscale @netbird`); `@home` is not in either fixed set because it is the only runtime choice, and reinstall logic handles it explicitly.
+- [x] Add `BTRFS_RECREATE_SUBVOLUMES` for the fixed recreate set.
+- [x] Move `partition_path` into `installer-common.bash`.
+- [x] Move `have_network` into `installer-common.bash`; the reinstall preflight uses it.
+- [x] Move package-file collection into `installer-common.bash`.
+- [x] Move package-name validation into `installer-common.bash`.
+- [x] Keep deferred `snap-pac` validation behavior in shared package validation.
+- [x] Move `target_chroot` into `installer-common.bash`.
+- [x] Move settings copy helpers into `installer-common.bash`.
+- [x] Move `append_unique_lines` into `installer-common.bash`.
+- [x] Move systemd enable/mask helpers into `installer-common.bash`.
+- [x] Move EFI boot-entry deletion by exact label into `installer-common.bash`.
+- [x] Move optional EFI/NVRAM cleanup prompt into `installer-common.bash`.
+- [x] Move UKI/fwupd signing helpers into `installer-common.bash`, including the JSON signature-verification helper (`sbctl --json verify` + `jq` in the target); plain `sbctl verify` exits 0 even for unsigned files, so the JSON check is the only enforceable verification. This is the one deliberate behavior change in Campaign 1: `install.bash` now enforces verification after every signing.
+- [x] Move GPU detection into `installer-common.bash`.
+- [x] Move microcode detection into `installer-common.bash`.
 
 ## Phase 4: Keep Fresh Install Behavior Unchanged
 
 After adding `installer-common.bash`, refactor `install.bash` to source it without changing fresh install behavior.
 
-- [ ] Source `installer-common.bash` from `install.bash`.
-- [ ] Remove duplicated constants from `install.bash`.
-- [ ] Replace duplicated helper functions in `install.bash` with shared functions.
-- [ ] Keep fresh install disk partitioning exactly as-is.
-- [ ] Keep fresh install ESP formatting exactly as-is.
-- [ ] Keep fresh install LUKS creation exactly as-is.
-- [ ] Keep fresh install Secure Boot key creation/enrollment exactly as-is.
-- [ ] Keep fresh install `Linux Boot Manager` EFI entry behavior exactly as-is.
-- [ ] Keep fresh install `fwupd` config/signing exactly as-is.
-- [ ] Run syntax/static checks before adding the rescue reinstall action.
+- [x] Source `installer-common.bash` from `install.bash`.
+- [x] Remove duplicated constants from `install.bash`.
+- [x] Replace duplicated helper functions in `install.bash` with shared functions.
+- [x] Keep fresh install disk partitioning exactly as-is.
+- [x] Keep fresh install ESP formatting exactly as-is.
+- [x] Keep fresh install LUKS creation exactly as-is.
+- [x] Keep fresh install Secure Boot key creation/enrollment exactly as-is.
+- [x] Keep fresh install `Linux Boot Manager` EFI entry behavior exactly as-is.
+- [x] Keep fresh install `fwupd` config/signing exactly as-is (signing now also verified via the shared JSON helper).
+- [x] Run syntax/static checks before adding the rescue reinstall action.
 - [ ] HARD CHECKPOINT: build the full ISO and perform a fresh install on real hardware to prove the refactor before any Phase 5 work begins. Campaign 1 ends here and is independently valuable; stop here if rushed.
 
 ## Phase 5: Add Rescue Reinstall Menu Action
