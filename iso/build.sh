@@ -47,6 +47,8 @@ clean_intermediate_outputs() {
         "$RESCUE_UKI_DIR/mkosi.extra/usr/local/bin/rescue-root" \
         "$RESCUE_UKI_DIR/mkosi.extra/usr/local/bin/trusted-paccheck"
 
+    rm -rf "$RESCUE_UKI_DIR/mkosi.extra/usr/local/share"
+
     shopt -s nullglob
     rm -f \
         "$RESCUE_UKI_DIR"/*.efi \
@@ -98,6 +100,12 @@ rsync -a --delete --filter=':- .gitignore' --exclude '.git' \
 # artifacts/ is gitignored, so copy the generated rescue UKI explicitly.
 install -D -m 0644 "$RESCUE_UKI_ARTIFACT" \
     "$PROFILE_DIR/airootfs/root/arch-new-install/artifacts/arch-rescue.efi"
+
+# The live ISO's copy of the repo doubles as the rescue reinstall payload;
+# stamp it with the same version format the rescue UKI payload uses.
+payload_revision=$(git -C "$REPO_DIR" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
+printf 'built %s from revision %s\n' "$(date --utc +%Y-%m-%dT%H:%M:%SZ)" "$payload_revision" \
+    >"$PROFILE_DIR/airootfs/root/arch-new-install/payload-version"
 
 # Launcher commands and login message
 install -D -m 0755 "$SCRIPT_DIR/airootfs/usr/local/bin/install-arch" \

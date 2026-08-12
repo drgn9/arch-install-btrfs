@@ -27,3 +27,4 @@ rescue-uki/*.sha256
 rescue-uki/*.bmap
 rescue-uki/mkosi.extra/usr/local/bin/rescue-root
 rescue-uki/mkosi.extra/usr/local/bin/trusted-paccheck
+rescue-uki/mkosi.extra/usr/local/share/

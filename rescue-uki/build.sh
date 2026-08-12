@@ -12,6 +12,7 @@ RESCUE_SOURCE="$REPO_DIR/iso/airootfs/usr/local/bin/rescue-root"
 RESCUE_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/bin/rescue-root"
 TRUSTED_PACCHECK_SOURCE="$REPO_DIR/iso/airootfs/usr/local/bin/trusted-paccheck"
 TRUSTED_PACCHECK_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/bin/trusted-paccheck"
+PAYLOAD_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/share/arch-new-install"
 
 # The rescue image is built with a pinned mkosi version so builds do not
 # silently change behavior when the build machine upgrades its mkosi package.
@@ -23,6 +24,7 @@ cleanup() {
     rm -f "$ROOTPW_FILE"
     rm -f "$RESCUE_OVERLAY"
     rm -f "$TRUSTED_PACCHECK_OVERLAY"
+    rm -rf "$PAYLOAD_OVERLAY"
 }
 trap cleanup EXIT
 
@@ -87,6 +89,18 @@ unset hashed_password
 
 install -D -m 0755 "$RESCUE_SOURCE" "$RESCUE_OVERLAY"
 install -D -m 0755 "$TRUSTED_PACCHECK_SOURCE" "$TRUSTED_PACCHECK_OVERLAY"
+
+# Rescue reinstall payload: package lists, static settings, and shared
+# installer code, frozen into the image at build time. The version file
+# lets the reinstall action print how old its embedded payload is.
+rm -rf "$PAYLOAD_OVERLAY"
+install -d -m 0755 "$PAYLOAD_OVERLAY"
+cp -r "$REPO_DIR/packages" "$PAYLOAD_OVERLAY/packages"
+cp -r "$REPO_DIR/settings" "$PAYLOAD_OVERLAY/settings"
+install -m 0644 "$REPO_DIR/installer-common.bash" "$PAYLOAD_OVERLAY/installer-common.bash"
+payload_revision=$(git -C "$REPO_DIR" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
+printf 'built %s from revision %s\n' "$(date --utc +%Y-%m-%dT%H:%M:%SZ)" "$payload_revision" \
+    >"$PAYLOAD_OVERLAY/payload-version"
 
 rm -rf "$SCRIPT_DIR/mkosi.output"
 rm -f "$ARTIFACT"
