@@ -36,7 +36,7 @@ User-facing commands:
 install-arch      run the installer from the custom ISO
 firewall-profile  select the persistent nftables firewall profile
 rollback-root     rollback a pacman transaction from the installed system
-rescue-root       repair or replace the root subvolume from rescue media
+rescue-root       repair, restore, verify, or reinstall the OS from rescue media
 ```
 
 Build/install flow:
@@ -605,6 +605,7 @@ Important paths:
 
 ```text
 install.bash                                      main installer
+installer-common.bash                             shared installer code, sourced by install.bash and the rescue reinstall action
 iso/build.sh                                      custom ISO build script
 iso/out/                                          generated ISO output, gitignored
 artifacts/arch-rescue.efi                         generated rescue UKI intermediate, removed after successful ISO build
@@ -613,6 +614,8 @@ iso/airootfs/usr/local/bin/rescue-root            live ISO rescue launcher
 iso/airootfs/usr/local/bin/trusted-paccheck       live/rescue package integrity checker
 settings/rollback/usr/local/sbin/rollback-root    installed rollback helper
 rescue-uki/                                       mkosi rescue UKI definition
+/usr/local/share/arch-new-install                 reinstall payload inside the rescue UKI (packages, settings, shared code, payload-version)
+/root/arch-new-install                            this repo embedded in the live ISO; doubles as the reinstall payload there
 ```
 
 Boot-related installed paths:
