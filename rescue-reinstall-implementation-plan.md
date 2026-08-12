@@ -68,23 +68,23 @@ These Btrfs subvolumes are replaced. `@` is renamed aside and retained until the
 - [x] Add `libfido2` to `rescue-uki/mkosi.conf` for systemd LUKS2 FIDO2 unlock support.
 - [x] Add `tpm2-tss` to `rescue-uki/mkosi.conf` for systemd LUKS2 TPM2 unlock support.
 - [x] Add `iptables` to `rescue-uki/mkosi.conf` and `iso/packages.x86_64` to avoid the `libxtables.so` provider prompt.
-- [ ] Do not add `git`; V2 should not require cloning the installer during rescue.
-- [ ] Do not add `mkosi`, `archiso`, or `openssl`; those are build-time tools, not rescue reinstall runtime tools.
+- [x] Do not add `git`; V2 should not require cloning the installer during rescue.
+- [x] Do not add `mkosi`, `archiso`, or `openssl`; those are build-time tools, not rescue reinstall runtime tools.
 - [x] Confirm `mkosi -C rescue-uki --no-pager summary` still succeeds.
 
 ## Phase 2: Rescue Installer Payload
 
 V2 needs more than the current `rescue-root` script. It needs package lists, static settings, and shared installer logic available inside the rescue image.
 
-- [ ] Choose rescue payload path: `/usr/local/share/arch-new-install`.
-- [ ] Update `rescue-uki/build.sh` to copy the required payload into `rescue-uki/mkosi.extra/usr/local/share/arch-new-install` before `mkosi build`.
-- [ ] Update `rescue-uki/build.sh` cleanup to remove the copied payload on exit.
-- [ ] Copy `packages/` into the payload.
-- [ ] Copy `settings/` into the payload.
-- [ ] Copy `installer-common.bash` into the payload after it exists.
-- [ ] Write a payload version file (UTC build date plus git revision) into the payload so the reinstall action can print how old its embedded packages/settings are.
-- [ ] Copy only files required for rescue reinstall; do not embed `.git`, ISO outputs, or mkosi outputs.
-- [ ] Keep the existing temporary copy of `rescue-root` as `/usr/local/bin/rescue-root`.
+- [x] Choose rescue payload path: `/usr/local/share/arch-new-install`.
+- [x] Update `rescue-uki/build.sh` to copy the required payload into `rescue-uki/mkosi.extra/usr/local/share/arch-new-install` before `mkosi build`.
+- [x] Update `rescue-uki/build.sh` cleanup to remove the copied payload on exit.
+- [x] Copy `packages/` into the payload.
+- [x] Copy `settings/` into the payload.
+- [x] Copy `installer-common.bash` into the payload after it exists.
+- [x] Write a payload version file (UTC build date plus git revision) into the payload so the reinstall action can print how old its embedded packages/settings are.
+- [x] Copy only files required for rescue reinstall; do not embed `.git`, ISO outputs, or mkosi outputs.
+- [x] Keep the existing temporary copy of `rescue-root` as `/usr/local/bin/rescue-root`.
 
 ## Phase 3: Shared Installer Code
 
@@ -132,7 +132,7 @@ After adding `installer-common.bash`, refactor `install.bash` to source it witho
 - [x] Keep fresh install `Linux Boot Manager` EFI entry behavior exactly as-is.
 - [x] Keep fresh install `fwupd` config/signing exactly as-is (signing now also verified via the shared JSON helper).
 - [x] Run syntax/static checks before adding the rescue reinstall action.
-- [ ] HARD CHECKPOINT: build the full ISO and perform a fresh install on real hardware to prove the refactor before any Phase 5 work begins. Campaign 1 ends here and is independently valuable; stop here if rushed.
+- [x] HARD CHECKPOINT: build the full ISO and perform a fresh install on real hardware to prove the refactor before any Phase 5 work begins. Campaign 1 ends here and is independently valuable; stop here if rushed.
 
 ## Phase 5: Add Rescue Reinstall Menu Action
 
@@ -142,49 +142,49 @@ Add a new action to `iso/airootfs/usr/local/bin/rescue-root`:
 Reinstall OS preserving selected state
 ```
 
-- [ ] Resolve the payload path for both environments — `/usr/local/share/arch-new-install` inside the rescue UKI, `/root/arch-new-install` on the live ISO — then source `installer-common.bash` from it.
-- [ ] Print the payload version (build date) at the start of the reinstall action so running from a stale embedded payload is a conscious choice.
-- [ ] Keep the existing `Repair installed system` action unchanged.
-- [ ] Keep the existing `Restore root from snapshot` action unchanged.
-- [ ] Keep the existing `Check package integrity` action unchanged.
-- [ ] Add `reinstall_preserving_state` as the implementation function for the new action.
-- [ ] Fail clearly if the shared installer payload is missing.
+- [x] Resolve the payload path for both environments — `/usr/local/share/arch-new-install` inside the rescue UKI, `/root/arch-new-install` on the live ISO — then source `installer-common.bash` from it.
+- [x] Print the payload version (build date) at the start of the reinstall action so running from a stale embedded payload is a conscious choice.
+- [x] Keep the existing `Repair installed system` action unchanged.
+- [x] Keep the existing `Restore root from snapshot` action unchanged.
+- [x] Keep the existing `Check package integrity` action unchanged.
+- [x] Add `reinstall_preserving_state` as the implementation function for the new action.
+- [x] Fail clearly if the shared installer payload is missing.
 
 ## Phase 6: Reinstall Preflight
 
 The reinstall action supports only systems created by this installer.
 
-- [ ] Select installed disk with the existing disk selector.
-- [ ] Treat partition 1 as ESP.
-- [ ] Treat partition 2 as root.
-- [ ] Require partition 2 to be LUKS.
-- [ ] Unlock the existing LUKS root.
-- [ ] Mount the Btrfs top-level volume at `/mnt` with `subvolid=5`.
-- [ ] Require every preserve-set subvolume and `@home` to exist; hard-fail otherwise (absence means this is not a system created by this installer). This holds even when the user will choose to erase `@home`.
-- [ ] Tolerate missing recreate-set subvolumes; they are simply created.
-- [ ] Verify `@sbctl` contains usable `sbctl` key material.
-- [ ] Verify the ESP partition can be mounted.
-- [ ] Confirm network reachability with the installer's `have_network` check before any destructive action.
-- [ ] Refresh `archlinux-keyring` in the rescue environment before any destructive action; the rescue UKI keyring is frozen at build time and a stale keyring is the most likely pacstrap failure.
-- [ ] Verify package names before retiring/recreating any subvolumes.
-- [ ] Show the effective preserve and recreate sets as resolved by the `@home` choice, so the confirmation screen states exactly what survives and what is destroyed.
-- [ ] Require explicit confirmation before retiring or deleting any subvolumes.
+- [x] Select installed disk with the existing disk selector.
+- [x] Treat partition 1 as ESP.
+- [x] Treat partition 2 as root.
+- [x] Require partition 2 to be LUKS.
+- [x] Unlock the existing LUKS root.
+- [x] Mount the Btrfs top-level volume at `/mnt` with `subvolid=5`.
+- [x] Require every preserve-set subvolume and `@home` to exist; hard-fail otherwise (absence means this is not a system created by this installer). This holds even when the user will choose to erase `@home`.
+- [x] Tolerate missing recreate-set subvolumes; they are simply created.
+- [x] Verify `@sbctl` contains usable `sbctl` key material.
+- [x] Verify the ESP partition can be mounted.
+- [x] Confirm network reachability with the installer's `have_network` check before any destructive action.
+- [x] Refresh `archlinux-keyring` in the rescue environment before any destructive action; the rescue UKI keyring is frozen at build time and a stale keyring is the most likely pacstrap failure.
+- [x] Verify package names before retiring/recreating any subvolumes.
+- [x] Show the effective preserve and recreate sets as resolved by the `@home` choice, so the confirmation screen states exactly what survives and what is destroyed.
+- [x] Require explicit confirmation before retiring or deleting any subvolumes.
 
 ## Phase 7: Reinstall Prompts
 
 Ask only for values needed to regenerate the new root system.
 
-- [ ] Ask for hostname.
-- [ ] Ask for timezone.
-- [ ] Ask for username.
-- [ ] Ask for user password.
-- [ ] Ask whether to preserve `@home` (default) or recreate it. Recreation requires a separate typed confirmation (e.g. typing `ERASE`) because it destroys user data with no retained copy.
-- [ ] Detect the enrolled unlock method from the LUKS2 header (`cryptsetup luksDump` token types `systemd-tpm2` / `systemd-fido2`; neither present means passphrase-only) instead of asking.
-- [ ] If exactly one method is detected, ask only for confirmation; never offer a free choice that can contradict the header. If multiple token types are enrolled, choose among the detected ones only.
-- [ ] Hard-fail with a clear message if the header cannot be read; a wrong `crypttab.initramfs` on a token-only system is unbootable.
-- [ ] Do not run `systemd-cryptenroll`.
-- [ ] Do not wipe LUKS password slots.
-- [ ] Do not create new LUKS credentials.
+- [x] Ask for hostname.
+- [x] Ask for timezone.
+- [x] Ask for username.
+- [x] Ask for user password.
+- [x] Ask whether to preserve `@home` (default) or recreate it. Recreation requires a separate typed confirmation (e.g. typing `ERASE`) because it destroys user data with no retained copy.
+- [x] Detect the enrolled unlock method from the LUKS2 header (`cryptsetup luksDump` token types `systemd-tpm2` / `systemd-fido2`; neither present means passphrase-only) instead of asking.
+- [x] If exactly one method is detected, ask only for confirmation; never offer a free choice that can contradict the header. If multiple token types are enrolled, choose among the detected ones only.
+- [x] Hard-fail with a clear message if the header cannot be read; a wrong `crypttab.initramfs` on a token-only system is unbootable.
+- [x] Do not run `systemd-cryptenroll`.
+- [x] Do not wipe LUKS password slots.
+- [x] Do not create new LUKS credentials.
 
 ## Phase 8: Retire And Recreate Subvolumes
 
@@ -192,106 +192,106 @@ The Btrfs layout uses sibling subvolumes, but `@snapshots` contains child snapsh
 
 `@` itself is never deleted during reinstall: it is renamed aside so a mid-reinstall failure (network loss during pacstrap, mirror outage) leaves the previous root intact instead of leaving the disk with no OS. Retirement plus recreation is cheap; only the retained old root's disk usage is the cost, and it is reclaimed after verification.
 
-- [ ] Rename `@` to `@old-reinstall-<timestamp>` with `mv -T`; hard-fail if the name already exists.
-- [ ] Build a helper that deletes a Btrfs subvolume tree child-first.
-- [ ] Use `btrfs subvolume list` to find child subvolumes under each recreate-set subvolume (snapshots under `@snapshots`; container-created subvolumes are possible under `@docker`/`@containers`).
-- [ ] Delete child subvolumes before deleting their parent.
-- [ ] Delete each remaining recreate-set subvolume.
-- [ ] When the user chose to erase `@home`, delete and recreate it exactly like the rest of the recreate set (child-first); when preserving, never touch it.
-- [ ] Recreate each recreate-set subvolume, including a fresh `@`.
-- [ ] Do not delete preserve-set subvolumes.
-- [ ] Do not delete unknown subvolumes outside the fixed recreate set, including `@old-reinstall-*` retained from earlier attempts.
-- [ ] Set the Btrfs default subvolume to the new `@` if needed.
-- [ ] Retain `@old-reinstall-<timestamp>` after success; print deletion instructions like the root-replacement action does.
+- [x] Rename `@` to `@old-reinstall-<timestamp>` with `mv -T`; hard-fail if the name already exists.
+- [x] Build a helper that deletes a Btrfs subvolume tree child-first.
+- [x] Use `btrfs subvolume list` to find child subvolumes under each recreate-set subvolume (snapshots under `@snapshots`; container-created subvolumes are possible under `@docker`/`@containers`).
+- [x] Delete child subvolumes before deleting their parent.
+- [x] Delete each remaining recreate-set subvolume.
+- [x] When the user chose to erase `@home`, delete and recreate it exactly like the rest of the recreate set (child-first); when preserving, never touch it.
+- [x] Recreate each recreate-set subvolume, including a fresh `@`.
+- [x] Do not delete preserve-set subvolumes.
+- [x] Do not delete unknown subvolumes outside the fixed recreate set, including `@old-reinstall-*` retained from earlier attempts.
+- [x] Set the Btrfs default subvolume to the new `@` if needed.
+- [x] Retain `@old-reinstall-<timestamp>` after success; print deletion instructions like the root-replacement action does.
 
 ## Phase 9: Mount Target Layout
 
-- [ ] Unmount the top-level mount.
-- [ ] Mount new `@` at `/mnt`.
-- [ ] Mount recreated sibling subvolumes at their target paths.
-- [ ] Mount `@home` (preserved or freshly recreated) at `/mnt/home`.
-- [ ] Mount preserved `@sbctl` at `/mnt/var/lib/sbctl`.
-- [ ] Mount preserved `@iwd` at `/mnt/var/lib/iwd`.
-- [ ] Mount preserved `@tailscale` at `/mnt/var/lib/tailscale`.
-- [ ] Mount preserved `@netbird` at `/mnt/var/lib/netbird`.
-- [ ] Mount the existing ESP at `/mnt/efi`.
-- [ ] Apply required permissions for `/mnt/root` and `/mnt/var/tmp`.
+- [x] Unmount the top-level mount.
+- [x] Mount new `@` at `/mnt`.
+- [x] Mount recreated sibling subvolumes at their target paths.
+- [x] Mount `@home` (preserved or freshly recreated) at `/mnt/home`.
+- [x] Mount preserved `@sbctl` at `/mnt/var/lib/sbctl`.
+- [x] Mount preserved `@iwd` at `/mnt/var/lib/iwd`.
+- [x] Mount preserved `@tailscale` at `/mnt/var/lib/tailscale`.
+- [x] Mount preserved `@netbird` at `/mnt/var/lib/netbird`.
+- [x] Mount the existing ESP at `/mnt/efi`.
+- [x] Apply required permissions for `/mnt/root` and `/mnt/var/tmp`.
 
 ## Phase 10: Reinstall Base System And Packages
 
-- [ ] Detect CPU microcode.
-- [ ] Run `pacstrap -K /mnt base base-devel linux linux-headers "$microcode" linux-firmware`.
-- [ ] Generate `/mnt/etc/fstab` with `genfstab -U /mnt`.
-- [ ] Install selected package files from the embedded rescue payload.
-- [ ] Keep `snap-pac` deferred until after Snapper is configured.
-- [ ] Do not install Docker packages; container subvolumes are storage boundaries only.
+- [x] Detect CPU microcode.
+- [x] Run `pacstrap -K /mnt base base-devel linux linux-headers "$microcode" linux-firmware`.
+- [x] Generate `/mnt/etc/fstab` with `genfstab -U /mnt`.
+- [x] Install selected package files from the embedded rescue payload.
+- [x] Keep `snap-pac` deferred until after Snapper is configured.
+- [x] Do not install Docker packages; container subvolumes are storage boundaries only.
 
 ## Phase 11: Regenerate Target Configuration
 
 Split target configuration so reinstall can reuse normal installer behavior without running fresh-install-only steps.
 
-- [ ] Generate `/etc/hostname`.
-- [ ] Generate `/etc/hosts`.
-- [ ] Generate locale config.
-- [ ] Generate vconsole config.
-- [ ] Generate timezone symlink.
-- [ ] Generate `/etc/crypttab.initramfs` from the detected unlock method with the exact option set the fresh installer uses, including `discard`.
-- [ ] Generate `/etc/cmdline.d/root.conf` with `root=/dev/mapper/cryptroot`.
-- [ ] Install `/etc/mkinitcpio.conf` from the encrypted variant.
-- [ ] Install `/etc/mkinitcpio.d/linux.preset`.
-- [ ] Install static settings from the embedded rescue payload.
-- [ ] Install `fwupd` config with `DisableShimForSecureBoot=true`.
-- [ ] Configure services like the normal installer; the current set includes `fstrim.timer` and `systemd-boot-update.service`, and the shared refactor should keep the enable list in one place so both paths cannot drift.
-- [ ] Preserve existing iwd state by mounting `@iwd`; do not overwrite it with rescue Wi-Fi credentials.
-- [ ] Create or update the requested user account.
-- [ ] Create the user with UID/GID 1000 (matches the fresh installer; when `@home` is preserved this keeps existing ownership correct), and verify ownership of `/home/$username` after creation.
-- [ ] On the preserve path, handle an existing `/home/$username` directory without deleting it; on the erase path, `useradd -m` populates a fresh skeleton home.
-- [ ] Set the requested user password.
-- [ ] Lock the root account.
+- [x] Generate `/etc/hostname`.
+- [x] Generate `/etc/hosts`.
+- [x] Generate locale config.
+- [x] Generate vconsole config.
+- [x] Generate timezone symlink.
+- [x] Generate `/etc/crypttab.initramfs` from the detected unlock method with the exact option set the fresh installer uses, including `discard`.
+- [x] Generate `/etc/cmdline.d/root.conf` with `root=/dev/mapper/cryptroot`.
+- [x] Install `/etc/mkinitcpio.conf` from the encrypted variant.
+- [x] Install `/etc/mkinitcpio.d/linux.preset`.
+- [x] Install static settings from the embedded rescue payload.
+- [x] Install `fwupd` config with `DisableShimForSecureBoot=true`.
+- [x] Configure services like the normal installer; the current set includes `fstrim.timer` and `systemd-boot-update.service`, and the shared refactor should keep the enable list in one place so both paths cannot drift.
+- [x] Preserve existing iwd state by mounting `@iwd`; do not overwrite it with rescue Wi-Fi credentials.
+- [x] Create or update the requested user account.
+- [x] Create the user with UID/GID 1000 (matches the fresh installer; when `@home` is preserved this keeps existing ownership correct), and verify ownership of `/home/$username` after creation.
+- [x] On the preserve path, handle an existing `/home/$username` directory without deleting it; on the erase path, `useradd -m` populates a fresh skeleton home.
+- [x] Set the requested user password.
+- [x] Lock the root account.
 
 ## Phase 12: Snapper And Pacman Hooks
 
-- [ ] Configure Snapper for the new `@` root.
-- [ ] Mount recreated `@snapshots` at `/.snapshots`.
-- [ ] Keep Snapper cleanup disabled.
-- [ ] Install `snap-pac` only after Snapper is configured.
-- [ ] Accept that previous Snapper snapshots are deleted because `@snapshots` is in the recreate set.
+- [x] Configure Snapper for the new `@` root.
+- [x] Mount recreated `@snapshots` at `/.snapshots`.
+- [x] Keep Snapper cleanup disabled.
+- [x] Install `snap-pac` only after Snapper is configured.
+- [x] Accept that previous Snapper snapshots are deleted because `@snapshots` is in the recreate set.
 
 ## Phase 13: Boot Files And Secure Boot
 
-- [ ] Rebuild UKIs with `mkinitcpio -P`.
-- [ ] Keep existing `/efi/EFI/Linux/arch-rescue.efi` unless V2 explicitly embeds a replacement rescue UKI artifact.
-- [ ] Sign `/efi/EFI/Linux/arch-linux.efi` with preserved `@sbctl` keys.
-- [ ] Sign `/efi/EFI/Linux/arch-rescue.efi` when present.
-- [ ] Sign `/usr/lib/systemd/boot/efi/systemd-bootx64.efi` to `/usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed` with preserved `@sbctl` keys.
-- [ ] Install systemd-boot files with `bootctl --esp-path=/efi --variables=no install`.
-- [ ] Sign `/efi/EFI/systemd/systemd-bootx64.efi` and `/efi/EFI/BOOT/BOOTX64.EFI`.
-- [ ] Sign `/usr/lib/fwupd/efi/fwupdx64.efi` to `/usr/lib/fwupd/efi/fwupdx64.efi.signed`.
-- [ ] Verify every signed artifact with the shared JSON verification helper; do not rely on bare `sbctl verify`, whose exit code is 0 even for unsigned or missing files.
-- [ ] Delete existing `arch-linux` firmware entries by exact label (legacy direct-EFISTUB installs).
-- [ ] Delete existing `arch-rescue` firmware entries by exact label (legacy direct-EFISTUB installs).
-- [ ] Delete existing `Linux Boot Manager` firmware entries by exact label.
-- [ ] Recreate the `Linux Boot Manager` firmware entry.
-- [ ] Do not call `sbctl create-keys`.
-- [ ] Do not call `sbctl enroll-keys`.
+- [x] Rebuild UKIs with `mkinitcpio -P`.
+- [x] Keep existing `/efi/EFI/Linux/arch-rescue.efi` unless V2 explicitly embeds a replacement rescue UKI artifact.
+- [x] Sign `/efi/EFI/Linux/arch-linux.efi` with preserved `@sbctl` keys.
+- [x] Sign `/efi/EFI/Linux/arch-rescue.efi` when present.
+- [x] Sign `/usr/lib/systemd/boot/efi/systemd-bootx64.efi` to `/usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed` with preserved `@sbctl` keys.
+- [x] Install systemd-boot files with `bootctl --esp-path=/efi --variables=no install`.
+- [x] Sign `/efi/EFI/systemd/systemd-bootx64.efi` and `/efi/EFI/BOOT/BOOTX64.EFI`.
+- [x] Sign `/usr/lib/fwupd/efi/fwupdx64.efi` to `/usr/lib/fwupd/efi/fwupdx64.efi.signed`.
+- [x] Verify every signed artifact with the shared JSON verification helper; do not rely on bare `sbctl verify`, whose exit code is 0 even for unsigned or missing files.
+- [x] Delete existing `arch-linux` firmware entries by exact label (legacy direct-EFISTUB installs).
+- [x] Delete existing `arch-rescue` firmware entries by exact label (legacy direct-EFISTUB installs).
+- [x] Delete existing `Linux Boot Manager` firmware entries by exact label.
+- [x] Recreate the `Linux Boot Manager` firmware entry.
+- [x] Do not call `sbctl create-keys`.
+- [x] Do not call `sbctl enroll-keys`.
 
 ## Phase 14: Cleanup And Exit
 
-- [ ] Remove temporary sudoers files if any were created.
-- [ ] Unmount `/mnt` recursively.
-- [ ] Close `/dev/mapper/cryptroot`.
-- [ ] Offer to reboot.
-- [ ] Print clear manual cleanup instructions if unmount or close fails.
-- [ ] On every failure path after root retirement, state that the previous root is retained as `@old-reinstall-<timestamp>` and that re-running the reinstall action is safe.
+- [x] Remove temporary sudoers files if any were created.
+- [x] Unmount `/mnt` recursively.
+- [x] Close `/dev/mapper/cryptroot`.
+- [x] Offer to reboot.
+- [x] Print clear manual cleanup instructions if unmount or close fails.
+- [x] On every failure path after root retirement, state that the previous root is retained as `@old-reinstall-<timestamp>` and that re-running the reinstall action is safe.
 
 ## Phase 15: Documentation
 
 Update `README.md` only after the behavior exists; it remains the source of truth for current behavior.
 
-- [ ] Document the reinstall action, its preserve/recreate sets, the optional `@home` erase (no retained copy), and when to choose it over rollback, root replacement, or a fresh install.
-- [ ] Document that the embedded payload is frozen at ISO build time and that the action prints its build date; rebuilding the ISO refreshes it.
-- [ ] Document that SSH host keys regenerate on reinstall, so remote clients will see host-key-changed warnings; this is expected, not an attack.
-- [ ] Document retained `@old-reinstall-<timestamp>` deletion, matching the existing `@old-<timestamp>` instructions.
+- [x] Document the reinstall action, its preserve/recreate sets, the optional `@home` erase (no retained copy), and when to choose it over rollback, root replacement, or a fresh install.
+- [x] Document that the embedded payload is frozen at ISO build time and that the action prints its build date; rebuilding the ISO refreshes it.
+- [x] Document that SSH host keys regenerate on reinstall, so remote clients will see host-key-changed warnings; this is expected, not an attack.
+- [x] Document retained `@old-reinstall-<timestamp>` deletion, matching the existing `@old-<timestamp>` instructions.
 
 ## Phase 16: Validation Commands
 
