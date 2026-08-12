@@ -386,6 +386,10 @@ replace_root_from_snapshot() {
     new_root_id=$(subvolume_id "$candidate")
     [[ "$new_root_id" =~ ^[0-9]+$ ]] || die 'Could not identify the replacement root subvolume.'
 
+    # snap-pac pre snapshots capture pacman's transaction lock. Nothing can
+    # hold a lock inside a root that has never booted, so clear it now.
+    rm -f "$candidate/var/lib/pacman/db.lck"
+
     [[ -d "$candidate/efi" && -d "$candidate/var/lib/sbctl" ]] || die 'Replacement root is missing required ESP or sbctl mount points.'
     arch-chroot "$candidate" bash -lc 'command -v mkinitcpio >/dev/null 2>&1 && command -v sbctl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1' || \
         die 'Replacement root does not contain mkinitcpio, sbctl, and jq.'
