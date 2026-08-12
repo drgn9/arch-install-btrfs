@@ -6,7 +6,7 @@ To begin the guided installation, type:
     install-arch
 
 To repair an existing installation, replace @ from a Snapper snapshot,
-or check package integrity, type:
+or reinstall the OS preserving selected state, type:
 
     rescue-root
 

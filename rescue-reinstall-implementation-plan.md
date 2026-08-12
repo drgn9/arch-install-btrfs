@@ -298,11 +298,11 @@ Update `README.md` only after the behavior exists; it remains the source of trut
 Run after each significant phase:
 
 ```bash
-bash -n install.bash installer-common.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch iso/airootfs/usr/local/bin/trusted-paccheck settings/rollback/usr/local/sbin/rollback-root settings/network/usr/local/sbin/firewall-profile
+bash -n install.bash installer-common.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch settings/rollback/usr/local/sbin/rollback-root settings/network/usr/local/sbin/firewall-profile
 ```
 
 ```bash
-shellcheck -x install.bash installer-common.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch iso/airootfs/usr/local/bin/trusted-paccheck settings/rollback/usr/local/sbin/rollback-root settings/network/usr/local/sbin/firewall-profile
+shellcheck -x install.bash installer-common.bash iso/build.sh rescue-uki/build.sh rescue-uki/mkosi.finalize rescue-uki/mkosi.postinst.chroot rescue-uki/mkosi.version iso/airootfs/usr/local/bin/rescue-root iso/airootfs/usr/local/bin/install-arch settings/rollback/usr/local/sbin/rollback-root settings/network/usr/local/sbin/firewall-profile
 ```
 
 `shellcheck -x` follows the `source` of `installer-common.bash` for cross-file analysis.
@@ -328,7 +328,6 @@ sudo ./iso/build.sh
 - [ ] Fresh USB installer still passes scripted checks.
 - [ ] Current rescue manual mount action still works.
 - [ ] Current rescue root replacement action still works.
-- [ ] Current rescue package integrity action still works.
 - [ ] Rescue UKI still builds.
 - [ ] Custom ISO still builds.
 - [ ] Fresh install works on hardware.

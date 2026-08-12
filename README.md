@@ -36,7 +36,7 @@ User-facing commands:
 install-arch      run the installer from the custom ISO
 firewall-profile  select the persistent nftables firewall profile
 rollback-root     rollback a pacman transaction from the installed system
-rescue-root       repair, restore, verify, or reinstall the OS from rescue media
+rescue-root       repair, restore, or reinstall the OS from rescue media
 ```
 
 Build/install flow:
@@ -87,7 +87,7 @@ What the build does:
 1. Installs build dependencies if needed: `archiso`, `rsync`, `python`, `openssl`, and `git`.
 2. Prompts for a rescue root password.
 3. Hashes that password into a temporary `rescue-uki/mkosi.rootpw` file.
-4. Copies `rescue-root` and `trusted-paccheck` into the mkosi overlay.
+4. Copies `rescue-root` and the reinstall payload into the mkosi overlay.
 5. Builds the rescue UKI with mkosi. mkosi is pinned to version 26: it is downloaded once into `~/.cache/arch-new-install/mkosi/` (outside this repository) and reused on later builds, so behavior does not change when the build machine upgrades its own packages. Bump `MKOSI_VERSION` in `rescue-uki/build.sh` to upgrade mkosi deliberately.
 6. Writes the rescue UKI artifact to `artifacts/arch-rescue.efi`.
 7. Deletes the temporary password file and copied overlay commands on exit.
@@ -108,7 +108,6 @@ The ISO contains these launcher commands:
 ```text
 install-arch
 rescue-root
-trusted-paccheck
 ```
 
 Rebuild the ISO when:
@@ -372,19 +371,11 @@ rescue-root
 
 If the installed rescue UKI or ESP is unavailable, boot the generated custom ISO instead. The ISO boots its own Arch live environment; it does not load the target system's `/efi/EFI/Linux/arch-rescue.efi`. From the live shell, run `rescue-root`.
 
-Both the on-disk rescue environment and custom ISO provide:
-
-```bash
-rescue-root
-trusted-paccheck
-```
-
-`rescue-root` is a guided Bash command with four actions:
+Both the on-disk rescue environment and custom ISO provide `rescue-root`, a guided Bash command with three actions:
 
 ```text
 Repair installed system
 Restore root from snapshot
-Check package integrity
 Reinstall OS preserving selected state
 ```
 
@@ -398,38 +389,6 @@ partition 2 -> LUKS+Btrfs root
 After selecting the disk, choose either token unlock for the enrolled TPM2/FIDO2 method or passphrase/recovery-key unlock for a separately enrolled credential.
 
 It refuses to continue if `/mnt` is already mounted or `/dev/mapper/cryptroot` already exists, because that usually means a previous rescue attempt was not cleaned up.
-
-### Check Package Integrity
-
-Use `trusted-paccheck` when you want to compare installed official Arch package files against metadata reconstructed from signed archive packages.
-
-The guided path is the `rescue-root` menu action `Check package integrity`: it asks how to handle non-official packages, unlocks LUKS, mounts the installed root and its `@var_cache` package cache read-only with `rescue=nologreplay`, runs `trusted-paccheck`, and unmounts and closes LUKS afterwards. `trusted-paccheck` still independently verifies the read-only and `rescue=nologreplay` mount flags before checking anything.
-
-To run it manually instead, mount the installed root read-only at `/mnt` yourself:
-
-```bash
-cryptsetup open --token-only ROOT_PARTITION cryptroot
-# Or, for an enrolled passphrase/recovery key:
-# cryptsetup open --disable-external-tokens ROOT_PARTITION cryptroot
-mount -o ro,rescue=nologreplay,noatime,compress=zstd:3,subvol=@ ROOT_DEVICE /mnt
-mount -o ro,rescue=nologreplay,noatime,compress=zstd:3,subvol=@var_cache ROOT_DEVICE /mnt/var/cache
-trusted-paccheck
-umount -R /mnt
-cryptsetup close cryptroot
-```
-
-Unlock LUKS first and use `/dev/mapper/cryptroot` as `ROOT_DEVICE`. The `rescue=nologreplay` option prevents Btrfs tree-log replay from modifying the filesystem during the nominally read-only mount; `trusted-paccheck` requires it. (The standalone `nologreplay` spelling was removed in kernel 6.16; the `norecovery` alias still works and is reported by the kernel as `rescue=nologreplay`.)
-Do not select `rescue-root`'s manual-repair action first: that action mounts `@` read-write, and `trusted-paccheck` refuses to run unless its target mount is read-only. Network access is also required to retrieve packages and signatures from the Arch Linux Archive.
-
-`trusted-paccheck` uses the target pacman database only as an inventory of installed package names, versions, and architectures. It takes each exact package file from the target's own pacman cache when the file's detached signature verifies against the rescue keyring, and downloads anything missing or failing verification from the Arch Linux Archive. The signature is the trust anchor, not where the bytes came from: a tampered cache file fails verification and is re-downloaded, so reusing the cache changes the runtime from hours to minutes without weakening the check. Verified metadata is reconstructed in a temporary pacman database under `/run`, then `paccheck` runs against `/mnt`. A package omitted from or falsified in the target inventory cannot be discovered independently by this process. The cache mount is optional; without it every package is downloaded from the archive, which is very slow.
-
-By default it fails before checking if any installed package cannot be retrieved as a signed official Arch package. This catches AUR/custom packages instead of silently omitting them. To check official packages and explicitly report skipped foreign/custom packages, run:
-
-```bash
-trusted-paccheck --official-only
-```
-
-It checks files belonging to the retrieved official packages. Paccheck's default exclusions mean hashes and properties are not fully checked for pacman backup/config files and `NoExtract`/`NoUpgrade` entries, so expected local configuration changes are not comprehensively audited. It does not verify skipped AUR/custom packages, custom files from this installer, user data, `/efi` UKIs, or extra files dropped outside package ownership.
 
 ### Choose Manual Repair
 
@@ -612,7 +571,6 @@ iso/out/                                          generated ISO output, gitignor
 artifacts/arch-rescue.efi                         generated rescue UKI intermediate, removed after successful ISO build
 iso/airootfs/usr/local/bin/install-arch           live ISO installer launcher
 iso/airootfs/usr/local/bin/rescue-root            live ISO rescue launcher
-iso/airootfs/usr/local/bin/trusted-paccheck       live/rescue package integrity checker
 settings/rollback/usr/local/sbin/rollback-root    installed rollback helper
 rescue-uki/                                       mkosi rescue UKI definition
 /usr/local/share/arch-new-install                 reinstall payload inside the rescue UKI (packages, settings, shared code, payload-version)

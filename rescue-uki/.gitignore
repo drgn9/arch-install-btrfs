@@ -20,5 +20,4 @@ mkosi.credentials/
 *.sha256
 *.bmap
 mkosi.extra/usr/local/bin/rescue-root
-mkosi.extra/usr/local/bin/trusted-paccheck
 mkosi.extra/usr/local/share/

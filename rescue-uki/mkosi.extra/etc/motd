@@ -3,5 +3,5 @@ Arch Rescue
 Guided recovery: rescue-root
   - repair installed system
   - restore root from snapshot
-  - check package integrity
+  - reinstall OS preserving selected state
 Wi-Fi:           impala

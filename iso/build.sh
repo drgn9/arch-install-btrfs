@@ -44,8 +44,7 @@ clean_intermediate_outputs() {
     rm -f \
         "$RESCUE_UKI_DIR/mkosi.rootpw" \
         "$RESCUE_UKI_DIR/mkosi.passphrase" \
-        "$RESCUE_UKI_DIR/mkosi.extra/usr/local/bin/rescue-root" \
-        "$RESCUE_UKI_DIR/mkosi.extra/usr/local/bin/trusted-paccheck"
+        "$RESCUE_UKI_DIR/mkosi.extra/usr/local/bin/rescue-root"
 
     rm -rf "$RESCUE_UKI_DIR/mkosi.extra/usr/local/share"
 
@@ -112,14 +111,12 @@ install -D -m 0755 "$SCRIPT_DIR/airootfs/usr/local/bin/install-arch" \
     "$PROFILE_DIR/airootfs/usr/local/bin/install-arch"
 install -D -m 0755 "$SCRIPT_DIR/airootfs/usr/local/bin/rescue-root" \
     "$PROFILE_DIR/airootfs/usr/local/bin/rescue-root"
-install -D -m 0755 "$SCRIPT_DIR/airootfs/usr/local/bin/trusted-paccheck" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/trusted-paccheck"
 install -D -m 0644 "$SCRIPT_DIR/airootfs/etc/motd" \
     "$PROFILE_DIR/airootfs/etc/motd"
 
 # mkarchiso does not preserve file modes from the profile overlay; executable
 # bits must be declared in profiledef.sh's file_permissions map.
-sed -i '/^file_permissions=(/a\  ["/usr/local/bin/install-arch"]="0:0:755"\n  ["/usr/local/bin/rescue-root"]="0:0:755"\n  ["/usr/local/bin/trusted-paccheck"]="0:0:755"' \
+sed -i '/^file_permissions=(/a\  ["/usr/local/bin/install-arch"]="0:0:755"\n  ["/usr/local/bin/rescue-root"]="0:0:755"' \
     "$PROFILE_DIR/profiledef.sh"
 
 sed -i 's/^iso_name=.*/iso_name="arch-btrfs"/' "$PROFILE_DIR/profiledef.sh"
