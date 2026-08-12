@@ -12,7 +12,7 @@ Add a new `rescue-root` action:
 Reinstall OS preserving selected state
 ```
 
-The action runs from `arch-rescue`, unlocks the existing installed LUKS root, keeps the existing partition table, ESP, LUKS container, Btrfs filesystem, and fixed preserve-set subvolumes, retires the current root aside and recreates the OS-managed subvolumes, reinstalls packages/settings, rebuilds/signs UKIs, reinstalls signed systemd-boot files, and recreates the `Linux Boot Manager` firmware entry.
+The action runs from `arch-rescue`, unlocks the existing installed LUKS root, keeps the existing partition table, ESP, LUKS container, Btrfs filesystem, and always-preserved subvolumes (plus `@home` unless the user chooses to erase it), retires the current root aside and recreates the OS-managed subvolumes, reinstalls packages/settings, rebuilds/signs UKIs, reinstalls signed systemd-boot files, and recreates the `Linux Boot Manager` firmware entry.
 
 ## Non-Goals
 
@@ -27,21 +27,22 @@ The action runs from `arch-rescue`, unlocks the existing installed LUKS root, ke
 - Do not add backup/journal machinery; the user is responsible for data backups. Retaining the previous root subvolume until reinstall succeeds is transactional safety, not backup machinery, and is in scope.
 - Keep the installed system policy aligned with the normal installer: mandatory LUKS root, mandatory Secure Boot, mandatory `lockdown=integrity`, signed systemd-boot with signed Type #2 UKIs, and no GRUB.
 
-## Fixed Preserve Set
+## Preserve Set
 
-These Btrfs subvolumes survive reinstall:
+These Btrfs subvolumes always survive reinstall; they are what make reinstall possible without Secure Boot Setup Mode or re-enrollment:
 
 ```text
-@home
 @sbctl
 @iwd
 @tailscale
 @netbird
 ```
 
+`@home` is preserved by default but is a runtime choice: the user may instead choose to recreate it (erasing all user data). When recreation is chosen, `@home` is deleted outright like the rest of the recreate set after its own explicit typed confirmation — no retained copy; a chosen wipe means the data is actually gone. Preflight still requires `@home` to exist either way; its presence is part of the installer-layout fingerprint.
+
 ## Fixed Recreate Set
 
-These Btrfs subvolumes are replaced. `@` is renamed aside and retained until the reinstall succeeds (matching the root-replacement `@old-*` pattern); the others are deleted and recreated:
+These Btrfs subvolumes are replaced. `@` is renamed aside and retained until the reinstall succeeds (matching the root-replacement `@old-*` pattern); the others are deleted and recreated. `@home` joins this set only when the user chooses to erase it:
 
 ```text
 @
@@ -100,7 +101,7 @@ Refactor discipline: every move in this phase is a verbatim cut-and-paste whose 
 - [ ] Move `BTRFS_MOUNT_OPTIONS` into `installer-common.bash`.
 - [ ] Move `BTRFS_SUBVOLUMES` into `installer-common.bash`.
 - [ ] Move `BTRFS_SUBVOLUME_MOUNTS` into `installer-common.bash`.
-- [ ] Add `BTRFS_PRESERVE_SUBVOLUMES` for the fixed preserve set.
+- [ ] Add `BTRFS_PRESERVE_SUBVOLUMES` for the always-preserve set (`@sbctl @iwd @tailscale @netbird`); `@home` is not in either fixed set because it is the only runtime choice, and reinstall logic handles it explicitly.
 - [ ] Add `BTRFS_RECREATE_SUBVOLUMES` for the fixed recreate set.
 - [ ] Move `partition_path` into `installer-common.bash`.
 - [ ] Move `have_network` into `installer-common.bash`; the reinstall preflight uses it.
@@ -159,15 +160,14 @@ The reinstall action supports only systems created by this installer.
 - [ ] Require partition 2 to be LUKS.
 - [ ] Unlock the existing LUKS root.
 - [ ] Mount the Btrfs top-level volume at `/mnt` with `subvolid=5`.
-- [ ] Require every preserve-set subvolume to exist; hard-fail otherwise (absence means this is not a system created by this installer).
+- [ ] Require every preserve-set subvolume and `@home` to exist; hard-fail otherwise (absence means this is not a system created by this installer). This holds even when the user will choose to erase `@home`.
 - [ ] Tolerate missing recreate-set subvolumes; they are simply created.
 - [ ] Verify `@sbctl` contains usable `sbctl` key material.
 - [ ] Verify the ESP partition can be mounted.
 - [ ] Confirm network reachability with the installer's `have_network` check before any destructive action.
 - [ ] Refresh `archlinux-keyring` in the rescue environment before any destructive action; the rescue UKI keyring is frozen at build time and a stale keyring is the most likely pacstrap failure.
 - [ ] Verify package names before retiring/recreating any subvolumes.
-- [ ] Show the fixed preserve set.
-- [ ] Show the fixed recreate set.
+- [ ] Show the effective preserve and recreate sets as resolved by the `@home` choice, so the confirmation screen states exactly what survives and what is destroyed.
 - [ ] Require explicit confirmation before retiring or deleting any subvolumes.
 
 ## Phase 7: Reinstall Prompts
@@ -178,6 +178,7 @@ Ask only for values needed to regenerate the new root system.
 - [ ] Ask for timezone.
 - [ ] Ask for username.
 - [ ] Ask for user password.
+- [ ] Ask whether to preserve `@home` (default) or recreate it. Recreation requires a separate typed confirmation (e.g. typing `ERASE`) because it destroys user data with no retained copy.
 - [ ] Detect the enrolled unlock method from the LUKS2 header (`cryptsetup luksDump` token types `systemd-tpm2` / `systemd-fido2`; neither present means passphrase-only) instead of asking.
 - [ ] If exactly one method is detected, ask only for confirmation; never offer a free choice that can contradict the header. If multiple token types are enrolled, choose among the detected ones only.
 - [ ] Hard-fail with a clear message if the header cannot be read; a wrong `crypttab.initramfs` on a token-only system is unbootable.
@@ -196,6 +197,7 @@ The Btrfs layout uses sibling subvolumes, but `@snapshots` contains child snapsh
 - [ ] Use `btrfs subvolume list` to find child subvolumes under each recreate-set subvolume (snapshots under `@snapshots`; container-created subvolumes are possible under `@docker`/`@containers`).
 - [ ] Delete child subvolumes before deleting their parent.
 - [ ] Delete each remaining recreate-set subvolume.
+- [ ] When the user chose to erase `@home`, delete and recreate it exactly like the rest of the recreate set (child-first); when preserving, never touch it.
 - [ ] Recreate each recreate-set subvolume, including a fresh `@`.
 - [ ] Do not delete preserve-set subvolumes.
 - [ ] Do not delete unknown subvolumes outside the fixed recreate set, including `@old-reinstall-*` retained from earlier attempts.
@@ -207,7 +209,7 @@ The Btrfs layout uses sibling subvolumes, but `@snapshots` contains child snapsh
 - [ ] Unmount the top-level mount.
 - [ ] Mount new `@` at `/mnt`.
 - [ ] Mount recreated sibling subvolumes at their target paths.
-- [ ] Mount preserved `@home` at `/mnt/home`.
+- [ ] Mount `@home` (preserved or freshly recreated) at `/mnt/home`.
 - [ ] Mount preserved `@sbctl` at `/mnt/var/lib/sbctl`.
 - [ ] Mount preserved `@iwd` at `/mnt/var/lib/iwd`.
 - [ ] Mount preserved `@tailscale` at `/mnt/var/lib/tailscale`.
@@ -242,8 +244,8 @@ Split target configuration so reinstall can reuse normal installer behavior with
 - [ ] Configure services like the normal installer; the current set includes `fstrim.timer` and `systemd-boot-update.service`, and the shared refactor should keep the enable list in one place so both paths cannot drift.
 - [ ] Preserve existing iwd state by mounting `@iwd`; do not overwrite it with rescue Wi-Fi credentials.
 - [ ] Create or update the requested user account.
-- [ ] Create the user with UID/GID 1000 so preserved `@home` ownership stays correct, and verify ownership of `/home/$username` after creation.
-- [ ] Handle an existing `/home/$username` directory without deleting it.
+- [ ] Create the user with UID/GID 1000 (matches the fresh installer; when `@home` is preserved this keeps existing ownership correct), and verify ownership of `/home/$username` after creation.
+- [ ] On the preserve path, handle an existing `/home/$username` directory without deleting it; on the erase path, `useradd -m` populates a fresh skeleton home.
 - [ ] Set the requested user password.
 - [ ] Lock the root account.
 
@@ -286,7 +288,7 @@ Split target configuration so reinstall can reuse normal installer behavior with
 
 Update `README.md` only after the behavior exists; it remains the source of truth for current behavior.
 
-- [ ] Document the reinstall action, its fixed preserve/recreate sets, and when to choose it over rollback, root replacement, or a fresh install.
+- [ ] Document the reinstall action, its preserve/recreate sets, the optional `@home` erase (no retained copy), and when to choose it over rollback, root replacement, or a fresh install.
 - [ ] Document that the embedded payload is frozen at ISO build time and that the action prints its build date; rebuilding the ISO refreshes it.
 - [ ] Document that SSH host keys regenerate on reinstall, so remote clients will see host-key-changed warnings; this is expected, not an attack.
 - [ ] Document retained `@old-reinstall-<timestamp>` deletion, matching the existing `@old-<timestamp>` instructions.
@@ -338,6 +340,7 @@ sudo ./iso/build.sh
 - [ ] A mid-reinstall failure (e.g., interrupted pacstrap) retains `@old-reinstall-*` and a re-run of the action succeeds.
 - [ ] Preserved `@home` remains mounted and user data remains present after reinstall.
 - [ ] Preserved `@home` ownership (UID/GID 1000) is correct after reinstall.
+- [ ] Reinstall with the `@home` erase choice produces a fresh empty home, requires the typed confirmation, and boots normally.
 - [ ] Preserved `@sbctl` signs new UKIs after reinstall.
 - [ ] Preserved `@iwd` Wi-Fi profiles remain present after reinstall.
 - [ ] Normal boot works after reinstall.
