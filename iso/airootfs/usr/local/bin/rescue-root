@@ -208,13 +208,20 @@ check_package_integrity() {
     mount -o "ro,rescue=nologreplay,$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
     mounted=yes
 
+    # The package cache on @var_cache lets trusted-paccheck verify local
+    # package files against their signatures instead of re-downloading the
+    # whole system from the slow archive server.
+    if ! mount -o "ro,rescue=nologreplay,$BTRFS_MOUNT_OPTIONS,subvol=@var_cache" "$root_device" /mnt/var/cache; then
+        show_warn 'Could not mount @var_cache; every package will be downloaded from the archive.'
+    fi
+
     result=0
     case "$mode" in
         Strict:*) trusted-paccheck || result=$? ;;
         *) trusted-paccheck --official-only || result=$? ;;
     esac
 
-    umount /mnt
+    umount -R /mnt
     mounted=no
     if [[ "$opened_luks" == yes ]]; then
         cryptsetup close cryptroot

@@ -403,7 +403,7 @@ It refuses to continue if `/mnt` is already mounted or `/dev/mapper/cryptroot` a
 
 Use `trusted-paccheck` when you want to compare installed official Arch package files against metadata reconstructed from signed archive packages.
 
-The guided path is the `rescue-root` menu action `Check package integrity`: it asks how to handle non-official packages, unlocks LUKS, mounts the installed root read-only with `rescue=nologreplay`, runs `trusted-paccheck`, and unmounts and closes LUKS afterwards. `trusted-paccheck` still independently verifies the read-only and `rescue=nologreplay` mount flags before checking anything.
+The guided path is the `rescue-root` menu action `Check package integrity`: it asks how to handle non-official packages, unlocks LUKS, mounts the installed root and its `@var_cache` package cache read-only with `rescue=nologreplay`, runs `trusted-paccheck`, and unmounts and closes LUKS afterwards. `trusted-paccheck` still independently verifies the read-only and `rescue=nologreplay` mount flags before checking anything.
 
 To run it manually instead, mount the installed root read-only at `/mnt` yourself:
 
@@ -412,15 +412,16 @@ cryptsetup open --token-only ROOT_PARTITION cryptroot
 # Or, for an enrolled passphrase/recovery key:
 # cryptsetup open --disable-external-tokens ROOT_PARTITION cryptroot
 mount -o ro,rescue=nologreplay,noatime,compress=zstd:3,subvol=@ ROOT_DEVICE /mnt
+mount -o ro,rescue=nologreplay,noatime,compress=zstd:3,subvol=@var_cache ROOT_DEVICE /mnt/var/cache
 trusted-paccheck
-umount /mnt
+umount -R /mnt
 cryptsetup close cryptroot
 ```
 
 Unlock LUKS first and use `/dev/mapper/cryptroot` as `ROOT_DEVICE`. The `rescue=nologreplay` option prevents Btrfs tree-log replay from modifying the filesystem during the nominally read-only mount; `trusted-paccheck` requires it. (The standalone `nologreplay` spelling was removed in kernel 6.16; the `norecovery` alias still works and is reported by the kernel as `rescue=nologreplay`.)
 Do not select `rescue-root`'s manual-repair action first: that action mounts `@` read-write, and `trusted-paccheck` refuses to run unless its target mount is read-only. Network access is also required to retrieve packages and signatures from the Arch Linux Archive.
 
-`trusted-paccheck` uses the target pacman database only as an inventory of installed package names and versions. It then downloads those exact versions from the Arch Linux Archive, verifies detached package signatures with the rescue keyring, reconstructs verification metadata in a temporary pacman database under `/run`, and runs `paccheck` against `/mnt`. A package omitted from or falsified in the target inventory cannot be discovered independently by this process.
+`trusted-paccheck` uses the target pacman database only as an inventory of installed package names, versions, and architectures. It takes each exact package file from the target's own pacman cache when the file's detached signature verifies against the rescue keyring, and downloads anything missing or failing verification from the Arch Linux Archive. The signature is the trust anchor, not where the bytes came from: a tampered cache file fails verification and is re-downloaded, so reusing the cache changes the runtime from hours to minutes without weakening the check. Verified metadata is reconstructed in a temporary pacman database under `/run`, then `paccheck` runs against `/mnt`. A package omitted from or falsified in the target inventory cannot be discovered independently by this process. The cache mount is optional; without it every package is downloaded from the archive, which is very slow.
 
 By default it fails before checking if any installed package cannot be retrieved as a signed official Arch package. This catches AUR/custom packages instead of silently omitting them. To check official packages and explicitly report skipped foreign/custom packages, run:
 

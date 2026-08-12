@@ -10,8 +10,11 @@ usage() {
     cat <<'EOF'
 Usage: trusted-paccheck [--target PATH] [--official-only]
 
-Build a trusted pacman database from signed Arch Linux Archive packages, then
-run paccheck against a read-only mounted Arch installation.
+Build a trusted pacman database from signed Arch packages, then run paccheck
+against a read-only mounted Arch installation. Exact package files are taken
+from the target's own pacman cache when their detached signatures verify
+against this environment's keyring; anything missing or failing verification
+is downloaded from the Arch Linux Archive.
 
 Options:
   --target PATH     Mounted installed system root. Default: /mnt
@@ -48,6 +51,8 @@ done
 
 [[ ${EUID:-0} -eq 0 ]] || die 'Run this script as root.'
 
+CACHE_DIR="$TARGET/var/cache/pacman/pkg"
+
 for cmd in mountpoint findmnt pacman pacman-key paccheck curl mktemp wc; do
     command -v "$cmd" >/dev/null || die "Required command not found: $cmd"
 done
@@ -83,23 +88,34 @@ mkdir -p "$PKGDIR" "$DB/local" "$HOOKDIR" "$ROOTDIR"
 
 printf 'Reading installed package inventory from %s...\n' "$TARGET"
 
-# The target database is trusted only for package names and versions. Package
-# metadata used for verification is reconstructed from signed archive packages.
-LC_ALL=C pacman --dbpath "$TARGET/var/lib/pacman" -Q >"$INVENTORY"
+# The target database is trusted only for package names, versions, and
+# architectures. Package metadata used for verification is reconstructed
+# from signed packages, and every package file is verified against the
+# rescue environment's keyring before it is used.
+LC_ALL=C awk '
+    FNR == 1 { name = ""; version = ""; arch = "" }
+    $0 == "%NAME%" { getline name }
+    $0 == "%VERSION%" { getline version }
+    $0 == "%ARCH%" { getline arch }
+    ENDFILE { print name, version, arch }
+' "$TARGET"/var/lib/pacman/local/*/desc >"$INVENTORY"
 [[ -s "$INVENTORY" ]] || die 'Installed package inventory is empty.'
 
 package_count=$(wc -l <"$INVENTORY")
 package_count=${package_count//[[:space:]]/}
 
 printf 'Found %s installed packages.\n\n' "$package_count"
-printf 'Downloading, verifying, and importing exact Arch packages...\n'
+if [[ -d "$CACHE_DIR" ]]; then
+    printf 'Verifying exact Arch packages (target cache first, archive fallback)...\n'
+else
+    printf 'Target package cache is unavailable; downloading every package from the archive...\n'
+fi
 
 declare -a MISSING_PACKAGES=()
 declare -a SKIPPED_PACKAGES=()
+declare -a CACHE_VERIFIED_FILES=()
 
-import_package() {
-    local package_file=$1
-
+import_packages() {
     pacman \
         -U \
         --dbonly \
@@ -111,75 +127,130 @@ import_package() {
         --hookdir "$HOOKDIR" \
         --root "$ROOTDIR" \
         --logfile "$WORK/pacman.log" \
-        "$package_file" >/dev/null
+        "$@" >/dev/null
 }
 
-download_verify_import_package() {
-    local pkg=$1
-    local version=$2
+# The target's own pacman cache usually holds the exact package files, and
+# the detached signature is the trust anchor, not the transport: a cached
+# file whose signature verifies against the rescue keyring is exactly as
+# trustworthy as a fresh archive download, and a tampered cache file simply
+# fails verification and is downloaded from the archive instead.
+verify_cached_package() {
+    local pkg=$1 version=$2 arch=$3
     local first=${pkg:0:1}
-    local arch ext filename url outfile
+    local ext filename cached link
 
-    # Archive filenames keep the epoch verbatim (e.g. mesa-1:25.1.4-1-...);
-    # a literal ':' is valid in a URL path.
-    for arch in x86_64 any; do
-        for ext in zst xz gz; do
-            filename="${pkg}-${version}-${arch}.pkg.tar.${ext}"
-            url="${ALA}/${first}/${pkg}/${filename}"
-            outfile="${PKGDIR}/${filename}"
+    [[ -d "$CACHE_DIR" ]] || return 1
 
-            if ! curl \
-                --globoff \
-                --fail \
-                --location \
-                --silent \
-                --retry 3 \
-                --retry-all-errors \
-                --output "${outfile}.tmp" \
-                "$url"
-            then
-                rm -f "${outfile}.tmp"
-                continue
+    for ext in zst xz gz; do
+        filename="${pkg}-${version}-${arch}.pkg.tar.${ext}"
+        cached="$CACHE_DIR/$filename"
+        [[ -f "$cached" ]] || continue
+
+        if [[ -f "$cached.sig" ]]; then
+            if pacman-key --verify "$cached.sig" "$cached" >/dev/null 2>&1; then
+                verified_package=$cached
+                return 0
             fi
+            return 1
+        fi
 
-            mv "${outfile}.tmp" "$outfile"
-
-            if ! curl \
-                --globoff \
-                --fail \
-                --location \
-                --silent \
-                --retry 3 \
-                --retry-all-errors \
-                --output "${outfile}.sig" \
-                "${url}.sig"
-            then
-                die "Package found but signature missing: $filename"
-            fi
-
-            if ! pacman-key --verify "${outfile}.sig" "$outfile" >/dev/null 2>&1; then
-                printf '\nSignature verification FAILED:\n  %s\n\n' "$filename"
-                pacman-key --verify "${outfile}.sig" "$outfile" || true
-                exit 1
-            fi
-
-            import_package "$outfile"
-            rm -f "$outfile" "${outfile}.sig"
-
-            printf '  verified: %s %s\n' "$pkg" "$version"
+        # The cache holds the package but not its signature: fetch only the
+        # tiny detached signature and verify the cached file against it. The
+        # signature is placed next to a symlink so pacman -U finds it.
+        link="$PKGDIR/$filename"
+        if curl \
+            --globoff \
+            --fail \
+            --location \
+            --silent \
+            --retry 3 \
+            --output "${link}.sig" \
+            "${ALA}/${first}/${pkg}/${filename}.sig" \
+            && pacman-key --verify "${link}.sig" "$cached" >/dev/null 2>&1
+        then
+            ln -sf -- "$cached" "$link"
+            verified_package=$link
             return 0
-        done
+        fi
+        rm -f "${link}.sig"
+        return 1
     done
 
     return 1
 }
 
-while IFS=' ' read -r pkg version; do
-    [[ -n "$pkg" && -n "$version" ]] || die 'Malformed package inventory entry.'
+download_verify_import_package() {
+    local pkg=$1
+    local version=$2
+    local arch=$3
+    local first=${pkg:0:1}
+    local ext filename url outfile
+
+    # Archive filenames keep the epoch verbatim (e.g. mesa-1:25.1.4-1-...);
+    # a literal ':' is valid in a URL path. The architecture comes from the
+    # installed database, so only the compression extension is probed, and
+    # curl must not retry on 404 (no --retry-all-errors).
+    for ext in zst xz gz; do
+        filename="${pkg}-${version}-${arch}.pkg.tar.${ext}"
+        url="${ALA}/${first}/${pkg}/${filename}"
+        outfile="${PKGDIR}/${filename}"
+
+        if ! curl \
+            --globoff \
+            --fail \
+            --location \
+            --silent \
+            --retry 3 \
+            --output "${outfile}.tmp" \
+            "$url"
+        then
+            rm -f "${outfile}.tmp"
+            continue
+        fi
+
+        mv "${outfile}.tmp" "$outfile"
+
+        if ! curl \
+            --globoff \
+            --fail \
+            --location \
+            --silent \
+            --retry 3 \
+            --output "${outfile}.sig" \
+            "${url}.sig"
+        then
+            die "Package found but signature missing: $filename"
+        fi
+
+        if ! pacman-key --verify "${outfile}.sig" "$outfile" >/dev/null 2>&1; then
+            printf '\nSignature verification FAILED:\n  %s\n\n' "$filename"
+            pacman-key --verify "${outfile}.sig" "$outfile" || true
+            exit 1
+        fi
+
+        import_packages "$outfile"
+        rm -f "$outfile" "${outfile}.sig"
+
+        printf '  verified (archive): %s %s\n' "$pkg" "$version"
+        return 0
+    done
+
+    return 1
+}
+
+while IFS=' ' read -r pkg version arch; do
+    [[ -n "$pkg" && -n "$version" && -n "$arch" ]] || die 'Malformed package inventory entry.'
     [[ "$pkg" =~ ^[a-z0-9@._+:-]+$ ]] || die "Invalid package name in installed database: $pkg"
     [[ "$version" != *"/"* && "$version" != *$'\n'* ]] || die "Invalid version in installed database: $pkg $version"
+    [[ "$arch" == x86_64 || "$arch" == any ]] || die "Invalid architecture in installed database: $pkg $arch"
 
-    if ! download_verify_import_package "$pkg" "$version"; then
+    if verify_cached_package "$pkg" "$version" "$arch"; then
+        CACHE_VERIFIED_FILES+=("$verified_package")
+        printf '  verified (cache):   %s %s\n' "$pkg" "$version"
+    elif download_verify_import_package "$pkg" "$version" "$arch"; then
+        :
+    else
         if [[ "$STRICT" == yes ]]; then
             MISSING_PACKAGES+=("$pkg $version")
         else
@@ -188,6 +259,15 @@ while IFS=' ' read -r pkg version; do
         fi
     fi
 done <"$INVENTORY"
+
+# Cache-verified packages are imported in batches; spawning pacman once per
+# package is measurably slower across a full system.
+if (( ${#CACHE_VERIFIED_FILES[@]} > 0 )); then
+    printf '\nImporting %s cache-verified packages into the trusted database...\n' "${#CACHE_VERIFIED_FILES[@]}"
+    for ((i = 0; i < ${#CACHE_VERIFIED_FILES[@]}; i += 200)); do
+        import_packages "${CACHE_VERIFIED_FILES[@]:i:200}"
+    done
+fi
 
 if (( ${#MISSING_PACKAGES[@]} > 0 )); then
     printf '\nERROR: The following installed packages could not be retrieved as signed official Arch packages:\n\n'
