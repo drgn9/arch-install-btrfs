@@ -149,7 +149,8 @@ Installer prompts:
 LUKS unlock behavior:
 
 - Passphrase-only installs keep the passphrase unlock method.
-- TPM2 + PIN and FIDO2 + PIN installs use the install user's password only as a temporary enrollment passphrase. When enrollment asks for the existing LUKS passphrase, enter the install user's password. The installer then removes that password slot. Add backup unlock methods later with `systemd-cryptenroll` if you want them.
+- TPM2 + PIN installs use the install user's password only as a temporary enrollment passphrase. When enrollment asks for the existing LUKS passphrase, enter the install user's password. The installer then removes that password slot. Add backup unlock methods later with `systemd-cryptenroll` if you want them.
+- FIDO2 + PIN installs retain the initial LUKS passphrase alongside the enrolled token. When enrollment asks for the existing LUKS passphrase, enter the install user's password. Either that passphrase or the YubiKey and its PIN can unlock the drive afterwards. Changing the account password later does not change the LUKS passphrase. See [Add a Backup FIDO2 Key](#add-a-backup-fido2-key) to enroll a second key using one USB port, test both keys, and optionally remove the password fallback.
 
 Secure Boot requirement:
 
@@ -261,6 +262,57 @@ installs to:
 /usr/local/sbin/rollback-root
 ```
 
+### Add a Backup FIDO2 Key
+
+After a FIDO2 installation, use the retained LUKS passphrase to enroll a backup key. Only the backup key needs to be connected during enrollment; the original key remains enrolled.
+
+1. Identify the encrypted root partition:
+
+   ```bash
+   sudo cryptsetup status cryptroot
+   ```
+
+   Use the partition shown on the `device:` line, not `/dev/mapper/cryptroot`. Set a variable to that path for the commands below; `/dev/nvme0n1p2` is an example that must be replaced with your actual partition:
+
+   ```bash
+   luks_device=/dev/nvme0n1p2
+   ```
+
+2. Disconnect the original YubiKey and connect only the backup. The backup must support FIDO2 `hmac-secret` and the `eddsa` credential algorithm used by the installer, and have a FIDO2 PIN configured.
+
+3. Enroll the backup without removing the password fallback:
+
+   ```bash
+   sudo systemd-cryptenroll "$luks_device" \
+       --fido2-device=auto \
+       --fido2-with-client-pin=yes \
+       --fido2-with-user-presence=yes \
+       --fido2-credential-algorithm=eddsa
+   ```
+
+   When asked for the current disk passphrase, enter the retained LUKS passphrase (the account password chosen during installation, unless the LUKS passphrase was changed separately). Follow the backup key's PIN and touch prompts.
+
+4. List the enrolled slots:
+
+   ```bash
+   sudo systemd-cryptenroll "$luks_device"
+   ```
+
+   There should now be two `fido2` slots plus the retained `password` slot.
+
+5. Reboot with only the backup key connected and verify that its PIN and touch unlock the drive. Then test another boot with only the original key connected. Keep the password fallback until both keys have been tested independently.
+
+6. Optionally remove the password fallback after both boot tests succeed. In the new shell after reboot, set `luks_device` to the actual encrypted partition again, then run:
+
+   ```bash
+   sudo systemd-cryptenroll "$luks_device" --wipe-slot=password
+   sudo systemd-cryptenroll "$luks_device"
+   ```
+
+   This removes all traditional LUKS password slots, leaving both FIDO2 enrollments intact. It does not change the user-account password. Without another enrolled recovery method, either YubiKey and its PIN is then required to unlock the drive, including from rescue.
+
+The enrollments are stored in the LUKS header, outside Btrfs snapshots. Adding the backup or removing the password fallback does not require rebuilding or re-signing the UKI, and restoring a root snapshot does not undo these enrollment changes.
+
 ### Firewall
 
 The installer enables `nftables.service` with the `drop` profile. It permits
@@ -348,7 +400,7 @@ If the installed system still boots, prefer `rollback-root` first. It is narrowe
 
 Use `rescue-root` when you need an offline repair environment or when the running system is too broken to trust.
 
-Rescue still requires a valid LUKS unlock method. It cannot bypass encryption. Passphrase-only installations can use their LUKS passphrase. TPM2/FIDO2 installations remove the temporary install-password slot, so the install user's password will not unlock them; use the enrolled token and PIN or a separate recovery key/passphrase slot that you added after installation. Enroll and securely store a backup LUKS unlock method before you need rescue.
+Rescue still requires a valid LUKS unlock method. It cannot bypass encryption. Passphrase-only installations can use their LUKS passphrase. FIDO2 installations can use an enrolled token and PIN or the retained initial LUKS passphrase, unless you removed that password slot after enrolling a backup key. TPM2 installations remove the temporary install-password slot, so the install user's password will not unlock them; use the enrolled token and PIN or a separate recovery key/passphrase slot that you added after installation. Enroll and test backup unlock methods before you need rescue.
 
 Installed rescue UKI entry points:
 
@@ -386,7 +438,7 @@ partition 1 -> ESP
 partition 2 -> LUKS+Btrfs root
 ```
 
-After selecting the disk, choose either token unlock for the enrolled TPM2/FIDO2 method or passphrase/recovery-key unlock for a separately enrolled credential.
+After selecting the disk, choose either token unlock for the enrolled TPM2/FIDO2 method or passphrase/recovery-key unlock for a retained or separately enrolled credential.
 
 It refuses to continue if `/mnt` is already mounted or `/dev/mapper/cryptroot` already exists, because that usually means a previous rescue attempt was not cleaned up.
 

@@ -217,13 +217,13 @@ configure_target() {
             show_action "ACTION REQUIRED: LUKS PASSPHRASE" \
                 "When asked for the existing LUKS passphrase," \
                 "enter the password for $username." \
-                "The temporary password slot is removed after enrollment."
+                "The password slot remains available as a fallback." \
+                "Remove it after enrolling and testing a backup FIDO2 key."
             target_chroot systemd-cryptenroll "$root_part" \
-                --wipe-slot=password \
                 --fido2-device=auto \
                 --fido2-with-client-pin=yes \
                 --fido2-credential-algorithm=eddsa
-            show_success "FIDO2 + PIN enrolled for LUKS unlock."
+            show_success "FIDO2 + PIN enrolled for LUKS unlock; passphrase fallback retained."
             ;;
     esac
 
