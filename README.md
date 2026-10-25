@@ -231,7 +231,7 @@ Package customization:
 ```text
 packages/base.conf                  base CLI, network, security, backup, utility packages
 packages/desktop-base.conf          desktop common packages, fonts, audio, browser, firmware tools
-packages/desktop-niri.conf          Niri compositor/session packages
+packages/desktop-custom.conf        compositor/session/window-manager packages
 packages/desktop-driver-intel.conf  Intel GPU packages, installed when Intel graphics are detected
 packages/desktop-driver-amd.conf    AMD GPU packages, installed when AMD graphics are detected
 ```

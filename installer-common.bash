@@ -195,7 +195,7 @@ append_unique_lines() {
 collect_selected_packages() {
     local file
 
-    selected_package_files=(packages/base.conf packages/desktop-base.conf packages/desktop-niri.conf)
+    selected_package_files=(packages/base.conf packages/desktop-base.conf packages/desktop-custom.conf)
     selected_package_files+=("${gpu_package_files[@]}")
 
     for file in "${selected_package_files[@]}"; do

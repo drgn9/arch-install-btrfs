@@ -102,9 +102,7 @@ show_header() {
     gum style \
         --foreground "$UI_ACCENT" --border-foreground "$UI_ACCENT" --border double \
         --align center --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
-        "Arch New Installer" \
-        "" \
-        "Niri-only Btrfs + UKI + systemd-boot"
+        "Arch Installation (luks + btrfs + uki + systemd-boot)"
 }
 
 show_section() {
