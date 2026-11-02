@@ -15,15 +15,23 @@ PAYLOAD_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/share/arch-new-install"
 # The rescue image is built with a pinned mkosi version so builds do not
 # silently change behavior when the build machine upgrades its mkosi package.
 # Bump MKOSI_VERSION deliberately after reading the mkosi release notes.
-MKOSI_VERSION=26
+MKOSI_VERSION=27.1
 MKOSI_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/arch-new-install/mkosi/v$MKOSI_VERSION"
+WORK_DIR=
 
 cleanup() {
     rm -f "$ROOTPW_FILE"
     rm -f "$RESCUE_OVERLAY"
     rm -rf "$PAYLOAD_OVERLAY"
+    # The cache bind mount exists only in the child mount namespace, which
+    # has exited before this cleanup runs. This never removes host packages.
+    if [[ -n "$WORK_DIR" ]]; then
+        rm -rf "$WORK_DIR"
+    fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ ${EUID:-0} -ne 0 ]]; then
     echo "ERROR: This script must be run as root." >&2
@@ -36,14 +44,25 @@ if [[ ! -f "$RESCUE_SOURCE" ]]; then
 fi
 
 deps_needed=()
-for dep in python3 rsync openssl git; do
+for dep in python3 rsync openssl git unshare mount; do
     command -v "$dep" &>/dev/null || deps_needed+=("$dep")
 done
 
 if [[ ${#deps_needed[@]} -gt 0 ]]; then
     echo "Installing rescue UKI build dependencies: ${deps_needed[*]}"
-    pacman -S --needed --noconfirm python rsync openssl git
+    pacman -S --needed --noconfirm python rsync openssl git util-linux
 fi
+
+# shellcheck source-path=SCRIPTDIR source=../build-common.bash
+source "$REPO_DIR/build-common.bash"
+init_build_package_cache
+echo "Using shared pacman package cache: $PACKAGE_CACHE_DIR"
+
+# Keep unpacked images off /tmp's size-limited tmpfs. Only package archives
+# persist across builds; metadata, output, and build roots are temporary.
+WORK_DIR=$(mktemp -d /var/tmp/arch-new-install-rescue.XXXXXX)
+MKOSI_PACKAGE_CACHE="$WORK_DIR/pkgcache"
+mkdir -p "$MKOSI_PACKAGE_CACHE/cache/pacman/pkg"
 
 read_secret() {
     local prompt=$1
@@ -102,13 +121,28 @@ if [[ ! -d "$MKOSI_HOME" ]]; then
 fi
 
 echo "Building rescue UKI..."
-PYTHONPATH="$MKOSI_HOME" python3 -m mkosi -C "$SCRIPT_DIR" build
+# Mount only the package archives into mkosi's cache layout. Using /var as
+# PackageCacheDirectory would also share the host's repository databases.
+# The private namespace contains the mount even if the build fails, and
+# exec ensures it is gone before the parent removes the temporary tree.
+# shellcheck disable=SC2016 # Arguments expand in the child shell.
+PYTHONPATH="$MKOSI_HOME" unshare --mount --propagation private -- bash -Eeuo pipefail -c '
+    mount --bind "$1" "$2/cache/pacman/pkg"
+    exec python3 -m mkosi -C "$3" \
+        --package-cache-dir="$2" \
+        --workspace-directory="$4" \
+        --output-directory="$4/output" \
+        --cache-directory= \
+        --incremental=no \
+        --history=no \
+        build
+' bash "$PACKAGE_CACHE_DIR" "$MKOSI_PACKAGE_CACHE" "$SCRIPT_DIR" "$WORK_DIR"
 
 shopt -s nullglob
-uki_outputs=("$SCRIPT_DIR"/mkosi.output/*.efi)
+uki_outputs=("$WORK_DIR"/output/*.efi)
 shopt -u nullglob
 if (( ${#uki_outputs[@]} != 1 )) || [[ ! -f "${uki_outputs[0]}" ]]; then
-    echo "ERROR: Expected exactly one rescue UKI in $SCRIPT_DIR/mkosi.output" >&2
+    echo "ERROR: Expected exactly one rescue UKI in $WORK_DIR/output" >&2
     exit 1
 fi
 

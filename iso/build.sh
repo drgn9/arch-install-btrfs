@@ -31,6 +31,11 @@ if [[ ! -d "$RELENG_DIR" ]]; then
     exit 1
 fi
 
+# shellcheck source-path=SCRIPTDIR source=../build-common.bash
+source "$REPO_DIR/build-common.bash"
+init_build_package_cache
+echo "Using shared pacman package cache: $PACKAGE_CACHE_DIR"
+
 clean_intermediate_outputs() {
     rm -rf \
         "$REPO_DIR/artifacts" \
@@ -83,9 +88,12 @@ cleanup() {
     rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 PROFILE_DIR="$WORK_DIR/profile"
 cp -r "$RELENG_DIR" "$PROFILE_DIR"
+write_build_pacman_conf "$PROFILE_DIR/pacman.conf" "$WORK_DIR/pacman.conf"
 
 # Extra live-environment packages on top of the stock releng list
 cat "$SCRIPT_DIR/packages.x86_64" >>"$PROFILE_DIR/packages.x86_64"
@@ -123,7 +131,7 @@ sed -i 's/^iso_name=.*/iso_name="arch-btrfs"/' "$PROFILE_DIR/profiledef.sh"
 
 echo "Building ISO (this takes a few minutes and downloads packages)..."
 clean_previous_iso_outputs
-mkarchiso -v -w "$WORK_DIR/build" -o "$OUT_DIR" "$PROFILE_DIR"
+mkarchiso -v -C "$WORK_DIR/pacman.conf" -w "$WORK_DIR/build" -o "$OUT_DIR" "$PROFILE_DIR"
 
 shopt -s nullglob
 iso_outputs=("$OUT_DIR"/arch-btrfs-*.iso)

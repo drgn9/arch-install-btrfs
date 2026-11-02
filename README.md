@@ -70,7 +70,8 @@ sudo ./iso/build.sh
 
 Faster builds:
 
-- The build uses the build machine's pacman cache, normally `/var/cache/pacman/pkg/`.
+- Both the rescue UKI and ISO builds share the build machine's first configured pacman `CacheDir`, normally `/var/cache/pacman/pkg/`. The scripts discover it with `pacman-conf CacheDir` and create it if needed. Each package version is stored once in this shared download cache and reused by either builder and host pacman.
+- The rescue builder bind-mounts only the package archive directory into mkosi's cache layout inside a private mount namespace. Repository metadata and installed-package databases remain separate from the host. The ISO builder receives a temporary pacman configuration using the same cache and the `releng` profile's repositories.
 - Update the build machine before building for fresher package databases, fewer mirror/version mismatches, and better cache reuse:
 
 ```bash
@@ -79,16 +80,17 @@ sudo ./iso/build.sh
 ```
 
 - Do not clear the pacman cache before building unless you intentionally want a cold rebuild. Clearing the cache forces packages to download again and makes the build slower.
+- Each build starts with fresh image roots. Temporary rescue output, metadata, and workspaces are kept under `/var/tmp/` and removed on exit; the shared package cache is retained. Unpacked image roots and the final ISO still need additional disk space while building.
 
 The build script does all required build work. There is no separate required rescue UKI build command.
 
 What the build does:
 
-1. Installs build dependencies if needed: `archiso`, `rsync`, `python`, `openssl`, and `git`.
+1. Installs build dependencies if needed: `archiso`, `rsync`, `python`, `openssl`, `git`, and `util-linux`.
 2. Prompts for a rescue root password.
 3. Hashes that password into a temporary `rescue-uki/mkosi.rootpw` file.
 4. Copies `rescue-root` and the reinstall payload into the mkosi overlay.
-5. Builds the rescue UKI with mkosi. mkosi is pinned to version 26: it is downloaded once into `~/.cache/arch-new-install/mkosi/` (outside this repository) and reused on later builds, so behavior does not change when the build machine upgrades its own packages. Bump `MKOSI_VERSION` in `rescue-uki/build.sh` to upgrade mkosi deliberately.
+5. Builds the rescue UKI with mkosi. mkosi is pinned to version 27.1, which includes the pacman fresh-cache fix: it is downloaded once into `${XDG_CACHE_HOME:-$HOME/.cache}/arch-new-install/mkosi/` (outside this repository, typically under `/root/.cache/` when using sudo) and reused on later builds. Bump `MKOSI_VERSION` in `rescue-uki/build.sh` to upgrade mkosi deliberately. Build history and incremental image caching are disabled for a fresh configuration and image root each time.
 6. Writes the rescue UKI artifact to `artifacts/arch-rescue.efi`.
 7. Deletes the temporary password file and copied overlay commands on exit.
 8. Builds the custom ISO from the Arch `releng` archiso profile.
@@ -618,6 +620,7 @@ Important paths:
 ```text
 install.bash                                      main installer
 installer-common.bash                             shared installer code, sourced by install.bash and the rescue reinstall action
+build-common.bash                                 shared package-cache setup for both image builders
 iso/build.sh                                      custom ISO build script
 iso/out/                                          generated ISO output, gitignored
 artifacts/arch-rescue.efi                         generated rescue UKI intermediate, removed after successful ISO build
