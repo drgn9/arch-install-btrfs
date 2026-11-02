@@ -38,19 +38,14 @@ if [[ ${EUID:-0} -ne 0 ]]; then
     exit 1
 fi
 
+echo "Installing build dependencies..."
+pacman -S --needed --noconfirm \
+    archiso rsync python python-pefile openssl git util-linux \
+    systemd-ukify kmod libarchive zstd
+
 if [[ ! -f "$RESCUE_SOURCE" ]]; then
     echo "ERROR: Missing rescue script: $RESCUE_SOURCE" >&2
     exit 1
-fi
-
-deps_needed=()
-for dep in python3 rsync openssl git unshare mount; do
-    command -v "$dep" &>/dev/null || deps_needed+=("$dep")
-done
-
-if [[ ${#deps_needed[@]} -gt 0 ]]; then
-    echo "Installing rescue UKI build dependencies: ${deps_needed[*]}"
-    pacman -S --needed --noconfirm python rsync openssl git util-linux
 fi
 
 # shellcheck source-path=SCRIPTDIR source=../build-common.bash

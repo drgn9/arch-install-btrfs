@@ -21,10 +21,10 @@ if [[ ${EUID:-0} -ne 0 ]]; then
     exit 1
 fi
 
-if ! command -v mkarchiso &>/dev/null || ! command -v rsync &>/dev/null; then
-    echo "Installing build dependencies: archiso rsync"
-    pacman -S --needed --noconfirm archiso rsync
-fi
+echo "Installing build dependencies..."
+pacman -S --needed --noconfirm \
+    archiso rsync python python-pefile openssl git util-linux \
+    systemd-ukify kmod libarchive zstd
 
 if [[ ! -d "$RELENG_DIR" ]]; then
     echo "ERROR: $RELENG_DIR not found. Is the archiso package installed correctly?" >&2

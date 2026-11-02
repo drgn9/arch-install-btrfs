@@ -86,7 +86,7 @@ The build script does all required build work. There is no separate required res
 
 What the build does:
 
-1. Installs build dependencies if needed: `archiso`, `rsync`, `python`, `openssl`, `git`, and `util-linux`.
+1. Runs `pacman -S --needed --noconfirm` at the beginning to install all build dependencies: `archiso`, `rsync`, `python`, `python-pefile`, `openssl`, `git`, `util-linux`, `systemd-ukify`, `kmod`, `libarchive`, and `zstd`. Both build scripts do this before any password prompts or build work; pacman skips packages already installed and current.
 2. Prompts for a rescue root password.
 3. Hashes that password into a temporary `rescue-uki/mkosi.rootpw` file.
 4. Copies `rescue-root` and the reinstall payload into the mkosi overlay.
