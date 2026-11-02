@@ -21,53 +21,18 @@ if [[ ! -d /sys/firmware/efi/efivars ]]; then
     exit 1
 fi
 
-connect_wifi_tui() {
-    local attempt
-
-    if ! command -v impala &>/dev/null; then
-        echo "impala is not available. Connect manually, then choose re-check." >&2
-        return 1
-    fi
-
-    rfkill unblock wifi 2>/dev/null || true
-    systemctl start iwd.service 2>/dev/null || true
-
-    impala || return 1
-
-    echo "Waiting for internet access..."
-    for ((attempt = 0; attempt < 15; attempt++)); do
-        if have_network; then
-            return 0
-        fi
-        sleep 2
-    done
-    echo "impala exited, but internet access was not detected yet." >&2
-    return 1
-}
-
 ensure_network() {
-    local choice
-
     if have_network; then
         echo "Internet connection OK"
         return 0
     fi
 
-    while ! have_network; do
-        echo ""
-        echo "No internet connection detected. The installer needs internet to download packages."
-        echo "  1) Open Wi-Fi manager (impala)"
-        echo "  2) Re-check (choose this after plugging in an ethernet cable)"
-        echo "  3) Abort"
-        read -rp "Choice [1]: " choice
-        case "${choice:-1}" in
-            1) connect_wifi_tui || echo "Wi-Fi setup did not succeed. Try again." >&2 ;;
-            2) ;;
-            3) exit 1 ;;
-            *) echo "Enter 1, 2 or 3." >&2 ;;
-        esac
-    done
-    echo "Internet connection OK"
+    rfkill unblock wifi 2>/dev/null || true
+    systemctl start iwd.service 2>/dev/null || true
+    echo "No internet connection detected. The installer needs internet to download packages."
+    show_wifi_instructions install-arch
+    echo "Alternatively, plug in an ethernet cable and run install-arch again."
+    exit 1
 }
 
 ensure_network
@@ -83,13 +48,13 @@ echo "Refreshing pacman databases and archlinux-keyring"
 pacman -Sy --needed --noconfirm archlinux-keyring
 
 deps_needed=()
-for dep in gum impala cryptsetup efibootmgr sfdisk wipefs blkdiscard partprobe mkfs.fat mkfs.btrfs btrfs lspci pacstrap arch-chroot genfstab; do
+for dep in gum iwctl cryptsetup efibootmgr sfdisk wipefs blkdiscard partprobe mkfs.fat mkfs.btrfs btrfs lspci pacstrap arch-chroot genfstab; do
     command -v "$dep" &>/dev/null || deps_needed+=("$dep")
 done
 
 if [[ ${#deps_needed[@]} -gt 0 ]]; then
     echo "Installing live environment dependencies: ${deps_needed[*]}"
-    pacman -S --needed --noconfirm gum impala cryptsetup efibootmgr util-linux dosfstools btrfs-progs parted pciutils arch-install-scripts
+    pacman -S --needed --noconfirm gum iwd cryptsetup efibootmgr util-linux dosfstools btrfs-progs parted pciutils arch-install-scripts
 fi
 
 UI_ACCENT=212

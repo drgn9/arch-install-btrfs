@@ -87,6 +87,22 @@ have_network() {
     fi
 }
 
+show_wifi_instructions() {
+    local resume_command=$1
+
+    printf '\nWi-Fi connection instructions (run these from the shell):\n'
+    printf '  1. Run: iwctl\n'
+    printf '  2. Run: device list\n'
+    printf '     Replace wlan0 below with the wireless device shown in the list.\n'
+    printf '  3. Run: station wlan0 scan\n'
+    printf '  4. Run: station wlan0 get-networks\n'
+    printf '  5. Run: station wlan0 connect "Your Wi-Fi name"\n'
+    printf '     Use your network name and enter the Wi-Fi password when prompted.\n'
+    printf '  6. Run: exit (to leave iwctl)\n'
+    printf '  7. Wait a few seconds, then run: %s\n' "$resume_command"
+    printf '     Internet access will be checked again.\n\n'
+}
+
 partition_path() {
     local disk=$1
     local number=$2

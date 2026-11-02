@@ -129,7 +129,17 @@ install-arch
 
 The selected target disk is destroyed. Read every prompt carefully.
 
-The installer checks internet access before disk work starts. If the system is offline, it opens the `impala` Wi-Fi TUI. Wi-Fi credentials from the live environment are not copied into the installed system; configure Wi-Fi after installation.
+The installer checks internet access before disk work starts. If offline, it displays numbered `iwctl` instructions and returns to the shell. Connect using the steps below, then run `install-arch` again to re-check internet access and continue. For Ethernet, plug in the cable and run `install-arch` again.
+
+1. Run `iwctl` from the live shell.
+2. Run `device list`. Replace `wlan0` in the following commands with your wireless device.
+3. Run `station wlan0 scan`.
+4. Run `station wlan0 get-networks`.
+5. Run `station wlan0 connect "Your Wi-Fi name"`, using your network name. Enter the Wi-Fi password when prompted.
+6. Run `exit` to leave iwctl.
+7. Wait a few seconds, then run `install-arch` again.
+
+The installation ISO and rescue image use `iwctl` from the `iwd` package. The installed desktop system includes `impala`. Wi-Fi credentials from the live environment are not copied into the installed system; configure Wi-Fi after installation.
 
 Fixed security policy:
 
@@ -424,6 +434,8 @@ rescue-root
 ```
 
 If the installed rescue UKI or ESP is unavailable, boot the generated custom ISO instead. The ISO boots its own Arch live environment; it does not load the target system's `/efi/EFI/Linux/arch-rescue.efi`. From the live shell, run `rescue-root`.
+
+For Wi-Fi, follow the numbered `iwctl` connection instructions shown at login (also listed in [Install](#2-install)), then run `rescue-root`. If the reinstall action detects no internet access, it displays the same instructions and returns to the shell; connect, then run `rescue-root` and select the action again.
 
 Both the on-disk rescue environment and custom ISO provide `rescue-root`, a guided Bash command with three actions:
 

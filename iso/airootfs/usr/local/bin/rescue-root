@@ -635,7 +635,10 @@ reinstall_preserving_state() {
     preflight_verify_esp
 
     show_info 'Checking network reachability'
-    have_network || die 'No internet access. Connect first (Wi-Fi: run impala), then re-run this action.'
+    if ! have_network; then
+        show_wifi_instructions rescue-root
+        die 'No internet access. Returning to the shell; connect, then run rescue-root again.'
+    fi
 
     # The rescue image keyring is frozen at build time; a stale keyring is
     # the most likely pacstrap failure, so refresh it before anything

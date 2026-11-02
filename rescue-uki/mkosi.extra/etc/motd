@@ -4,4 +4,14 @@ Guided recovery: rescue-root
   - repair installed system
   - restore root from snapshot
   - reinstall OS preserving selected state
-Wi-Fi:           impala
+
+Wi-Fi connection instructions:
+  1. Run: iwctl
+  2. Run: device list
+     Replace wlan0 below with your wireless device.
+  3. Run: station wlan0 scan
+  4. Run: station wlan0 get-networks
+  5. Run: station wlan0 connect "Your Wi-Fi name"
+     Enter the Wi-Fi password when prompted.
+  6. Run: exit (to leave iwctl)
+  7. Wait a few seconds, then run rescue-root again.
