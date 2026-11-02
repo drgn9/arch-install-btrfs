@@ -375,6 +375,7 @@ EOF
     copy_settings_source network/usr/local/share/firewall-profiles/drop.nft /etc/nftables.conf
     copy_settings_file network /usr/local/sbin/firewall-profile 0755
     enable_target_service nftables.service
+    copy_settings_file maintenance /usr/local/sbin/update-rescue 0755
 
     copy_settings_file network /etc/sysctl.d/99-firewall-settings.conf
     copy_settings_file power /etc/sysctl.d/99-watchdog-settings.conf

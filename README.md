@@ -37,6 +37,7 @@ install-arch      run the installer from the custom ISO
 firewall-profile  select the persistent nftables firewall profile
 rollback-root     rollback a pacman transaction from the installed system
 rescue-root       repair, restore, or reinstall the OS from rescue media
+update-rescue     rebuild, sign, and replace the installed rescue UKI from the desktop
 ```
 
 Build/install flow:
@@ -256,6 +257,7 @@ Settings customization:
 settings/access/       sudo and polkit policy
 settings/boot/         kernel command line, mkinitcpio config, UKI preset
 settings/hardware/     Bluetooth, Thunderbolt, Wi-Fi, and fwupd configuration
+settings/maintenance/  installed rescue image updater
 settings/network/      networkd, resolved, iwd, nftables, and network sysctls
 settings/power/        sleep, watchdog, and zram policy
 settings/rollback/     rollback-root helper
@@ -625,7 +627,121 @@ btrfs subvolume delete /mnt/@old-reinstall-<timestamp>
 umount /mnt
 ```
 
-## 5. Reference
+## 5. Maintenance
+
+Maintain the installed desktop, installation media, and installed rescue image separately:
+
+| Component | Normal workflow | Suggested timing |
+| --- | --- | --- |
+| Installed desktop | `sudo pacman -Syu` | Regular system updates |
+| Installation ISO / recovery USB | Update the build host, run `sudo ./iso/build.sh`, boot-test, then refresh the USB | About monthly during active use; after installer changes; before a planned installation |
+| Installed rescue UKI | Run `update-rescue` from the installed desktop, then boot-test the replacement | Review about every three months; sooner after rescue fixes, relevant kernel/tool fixes, or hardware changes |
+
+These intervals are recommendations, not expiration dates. Retain a tested recovery USB and the previous known-working ISO while validating replacements. A normal desktop package update does not refresh the contents of the installed rescue UKI. Rebuilding the ISO also does not replace the rescue image already installed on a machine.
+
+### Prepare a Maintenance Checkout
+
+Keep a complete checkout of this repository on the installed machine. For example, as your normal desktop user:
+
+```bash
+git clone https://github.com/drgn9/arch-install-btrfs.git "$HOME/arch-install-btrfs"
+```
+
+If you already have a checkout, use its path in the following commands instead. `update-rescue` builds from that checkout's current working tree; it does not fetch repository changes itself.
+
+New installations and rescue reinstalls install `/usr/local/sbin/update-rescue` automatically. On a machine installed before this command was added, install it once from your checkout:
+
+```bash
+sudo pacman -Syu --needed sbctl jq systemd-ukify python-pefile
+sudo install -Dm0755 \
+    "$HOME/arch-install-btrfs/settings/maintenance/usr/local/sbin/update-rescue" \
+    /usr/local/sbin/update-rescue
+```
+
+### Refresh the Installed Rescue Image
+
+Run this from the working installed desktop, while internet access is available:
+
+```bash
+git -C "$HOME/arch-install-btrfs" pull --ff-only
+sudo pacman -Syu
+```
+
+If the desktop update requires a reboot, reboot now. Then refresh the updater and build/deploy the rescue image:
+
+```bash
+sudo install -Dm0755 \
+    "$HOME/arch-install-btrfs/settings/maintenance/usr/local/sbin/update-rescue" \
+    /usr/local/sbin/update-rescue
+sudo update-rescue "$HOME/arch-install-btrfs"
+```
+
+The `install` command refreshes the updater itself from the checkout, including any maintenance fixes.
+
+The rescue builder asks you to choose and confirm the root password for the new rescue environment. Enter the old rescue password again if you want to retain it, or choose a new one. This does not change the desktop password or LUKS unlock credentials.
+
+The updater:
+
+1. Checks that it is operating on the installed Btrfs system, that `/efi` is mounted as vfat, and that the persistent `/var/lib/sbctl` subvolume and existing keys are available. Concurrent updater runs are blocked.
+2. Calls `rescue-uki/build.sh` to build only the rescue UKI, reusing the shared package cache. The new image includes updated packages and the checkout's rescue scripts, package lists, and reinstall settings.
+3. Copies the image to a temporary filename on the ESP, checks its rescue image identity, and reports its kernel and `IMAGE_VERSION` build identifier.
+4. Signs the staged image with this machine's existing `sbctl` keys and explicitly checks the signature result. Temporary filenames are not added to the signing database; the installed rescue path retains its existing registration.
+5. Saves an exact copy of the current installed image at `/var/lib/sbctl/rescue-backups/arch-rescue.efi`.
+6. Flushes the staged files and replaces `/efi/EFI/Linux/arch-rescue.efi` by renaming the already signed and verified file on the same filesystem. It verifies the installed signature again.
+
+Build, inspection, signing, backup, or staging failures before replacement leave the installed rescue image in place. No new Secure Boot keys or firmware enrollment are needed. The builder's unsigned output also remains at `artifacts/arch-rescue.efi` in the checkout.
+
+The backup is stored on `@sbctl`, outside root snapshots, so it survives root rollback and rescue reinstall. It is outside the boot loader's auto-discovery directory and is not a separate boot menu entry. The ESP needs enough free space for the current rescue image and the staged replacement; the backup uses space on the Btrfs filesystem instead.
+
+### Boot-Test the Replacement
+
+Once the updater succeeds, reboot into rescue when convenient:
+
+```bash
+sudo systemctl reboot --boot-loader-entry=arch-rescue.efi
+```
+
+1. Log in with the rescue root password selected during the build.
+2. Check `uname -r` and the build identity in `/usr/lib/os-release` (`IMAGE_ID` and `IMAGE_VERSION`).
+3. Confirm your disks are visible. If you rely on Wi-Fi, test connecting with `iwctl`.
+4. Run `rescue-root` and select **Repair installed system** to test unlocking the drive and mounting the installed system. A routine boot test does not require a snapshot rollback or reinstall.
+5. Follow the printed instructions to unmount `/mnt` and close `cryptroot` if it was opened, then reboot to the desktop.
+
+Keep the previous-image backup and tested USB available until this succeeds. Each successful update replaces the single backup with the image that was installed immediately before that update, so boot-test one update before deploying another.
+
+### Restore the Previous Rescue Image
+
+If the replacement fails its boot test, boot the normal desktop and run:
+
+```bash
+sudo update-rescue --restore
+```
+
+This stages the saved image on the ESP, checks its rescue identity and signature, and replaces the installed rescue image. It works offline, does not rebuild or ask for a rescue password, and retains the backup instead of overwriting it with the rejected image. The restored image uses its original rescue root password. Boot-test it with the same one-shot reboot command above.
+
+If the desktop is also unavailable, boot the recovery USB, run `rescue-root`, and choose **Repair installed system**. Once `/mnt`, `/mnt/efi`, and `/mnt/var/lib/sbctl` are mounted, run:
+
+```bash
+arch-chroot /mnt update-rescue --restore
+```
+
+Then follow the repair action's unmount and LUKS-close instructions before rebooting. If a root rollback restored a version of the system without `update-rescue`, copy the updater from your checkout into `/mnt/usr/local/sbin/` first and ensure its dependencies are available in that installed system.
+
+### Refresh the Installation / Recovery USB
+
+On your Arch build machine, update your checkout and the build host, then build:
+
+```bash
+git -C "$HOME/arch-install-btrfs" pull --ff-only
+sudo pacman -Syu
+sudo "$HOME/arch-install-btrfs/iso/build.sh"
+```
+
+Before building, copy any previous known-good ISO you want to retain to a location outside `iso/out/`; the build script clears that directory. Write the replacement ISO to your recovery USB using your usual flashing method, and test UEFI boot, networking, disk visibility, and the rescue repair action before relying on it.
+
+During an actual snapshot rollback, use the tested rescue environment as built. Running `pacman -Syu` inside the live rescue environment only updates that temporary session and does not update the embedded UKI for the next boot. Rebuild and deploy the image from the desktop between recovery sessions instead.
+
+## 6. Reference
 
 Important paths:
 
@@ -639,9 +755,12 @@ artifacts/arch-rescue.efi                         generated rescue UKI intermedi
 iso/airootfs/usr/local/bin/install-arch           live ISO installer launcher
 iso/airootfs/usr/local/bin/rescue-root            live ISO rescue launcher
 settings/rollback/usr/local/sbin/rollback-root    installed rollback helper
+settings/maintenance/usr/local/sbin/update-rescue installed rescue updater (source)
 rescue-uki/                                       mkosi rescue UKI definition
 /usr/local/share/arch-new-install                 reinstall payload inside the rescue UKI (packages, settings, shared code, payload-version)
 /root/arch-new-install                            this repo embedded in the live ISO; doubles as the reinstall payload there
+/usr/local/sbin/update-rescue                     installed rescue maintenance command
+/var/lib/sbctl/rescue-backups/arch-rescue.efi       previous rescue image, preserved outside root snapshots
 ```
 
 Boot-related installed paths:
