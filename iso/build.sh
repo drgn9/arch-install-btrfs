@@ -24,7 +24,7 @@ fi
 echo "Installing build dependencies..."
 pacman -S --needed --noconfirm \
     archiso rsync python python-pefile openssl git util-linux \
-    systemd-ukify kmod libarchive zstd
+    systemd-ukify kmod libarchive cpio zstd
 
 if [[ ! -d "$RELENG_DIR" ]]; then
     echo "ERROR: $RELENG_DIR not found. Is the archiso package installed correctly?" >&2

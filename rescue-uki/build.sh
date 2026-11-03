@@ -41,7 +41,7 @@ fi
 echo "Installing build dependencies..."
 pacman -S --needed --noconfirm \
     archiso rsync python python-pefile openssl git util-linux \
-    systemd-ukify kmod libarchive zstd
+    systemd-ukify kmod libarchive cpio zstd
 
 if [[ ! -f "$RESCUE_SOURCE" ]]; then
     echo "ERROR: Missing rescue script: $RESCUE_SOURCE" >&2
