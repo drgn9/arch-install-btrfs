@@ -262,9 +262,10 @@ settings/network/      networkd, resolved, iwd, nftables, and network sysctls
 settings/power/        sleep, watchdog, and zram policy
 settings/rollback/     rollback-root helper
 settings/security/     AppArmor, coredumps, kernel sysctls, and module policy
+settings/user/         home-relative niri and mango configuration defaults
 ```
 
-Each `settings/<subsystem>/` directory is a partial root filesystem. For example:
+Each system `settings/<subsystem>/` directory is a partial root filesystem. For example:
 
 ```text
 settings/rollback/usr/local/sbin/rollback-root
@@ -275,6 +276,13 @@ installs to:
 ```text
 /usr/local/sbin/rollback-root
 ```
+
+`settings/user/` is relative to the selected user's home directory. After creating
+the account, the installer copies `.config/niri/config.kdl` and
+`.config/mango/config.conf` into `/home/<username>/`, with user ownership and
+permissions of `0644` for files and `0755` for newly created directories.
+Existing configuration files and symlinks are kept, including during rescue
+reinstallation with a preserved home directory.
 
 ### Add a Backup FIDO2 Key
 

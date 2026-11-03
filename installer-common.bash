@@ -174,6 +174,29 @@ append_settings_file() {
     append_unique_lines "$SETTINGS_DIR/$subsystem/${target#/}" "$target"
 }
 
+install_user_settings() {
+    local user_home="/mnt/home/$username"
+    local user_uid user_gid directory config
+
+    user_uid=$(target_chroot id -u "$username")
+    user_gid=$(target_chroot id -g "$username")
+
+    for directory in .config .config/niri .config/mango; do
+        if [[ ! -d "$user_home/$directory" ]]; then
+            install -d -m 0755 -o "$user_uid" -g "$user_gid" "$user_home/$directory"
+        fi
+    done
+
+    for config in .config/niri/config.kdl .config/mango/config.conf; do
+        # Keep existing user configuration when rescue reinstall preserves home,
+        # including symlinks whose targets may currently be unavailable.
+        if [[ ! -e "$user_home/$config" && ! -L "$user_home/$config" ]]; then
+            install -m 0644 -o "$user_uid" -g "$user_gid" \
+                "$SETTINGS_DIR/user/$config" "$user_home/$config"
+        fi
+    done
+}
+
 enable_target_service() {
     local output
 
@@ -474,6 +497,8 @@ EOF
     else
         target_chroot usermod -aG users,wheel "$username"
     fi
+
+    install_user_settings
 
     printf '%s:%s\n' "$username" "$userpass" | target_chroot chpasswd
 
