@@ -344,8 +344,6 @@ setup_snapper_rollback() {
     systemctl --root=/mnt disable snapper-timeline.timer
     target_chroot snapper --no-dbus -c root get-config >/dev/null
 
-    copy_settings_file rollback /usr/local/sbin/rollback-root 0755
-
     # Install snap-pac only after Snapper's root config and sibling
     # @snapshots mount are in place, so installer pacman work is not captured.
     target_chroot pacman -S --needed --noconfirm snap-pac

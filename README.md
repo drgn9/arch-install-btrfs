@@ -18,7 +18,7 @@ This installer creates one Arch Linux system with:
 - Mandatory kernel lockdown in integrity mode.
 - Default-deny nftables host firewall with selectable persistent profiles.
 - Snapper root snapshots with `snap-pac` pre/post pacman snapshots.
-- No scheduled Snapper cleanup. Snapshots stay until you delete them or `rollback-root` successfully consumes a pre/post pair.
+- No scheduled Snapper cleanup. Snapshots stay until you delete them.
 - A rescue UKI installed on the target ESP for rollback/repair without USB media.
 
 The boot chain is:
@@ -35,7 +35,6 @@ User-facing commands:
 ```text
 install-arch      run the installer from the custom ISO
 firewall-profile  select the persistent nftables firewall profile
-rollback-root     rollback a pacman transaction from the installed system
 rescue-root       repair, restore, or reinstall the OS from rescue media
 ```
 
@@ -258,7 +257,6 @@ settings/boot/         kernel command line, mkinitcpio config, UKI preset
 settings/hardware/     Bluetooth, Thunderbolt, Wi-Fi, and fwupd configuration
 settings/network/      networkd, resolved, iwd, nftables, and network sysctls
 settings/power/        sleep, watchdog, and zram policy
-settings/rollback/     rollback-root helper
 settings/security/     AppArmor, coredumps, kernel sysctls, and module policy
 settings/user/         home-relative niri and mango configuration defaults
 ```
@@ -266,13 +264,13 @@ settings/user/         home-relative niri and mango configuration defaults
 Each system `settings/<subsystem>/` directory is a partial root filesystem. For example:
 
 ```text
-settings/rollback/usr/local/sbin/rollback-root
+settings/network/usr/local/sbin/firewall-profile
 ```
 
 installs to:
 
 ```text
-/usr/local/sbin/rollback-root
+/usr/local/sbin/firewall-profile
 ```
 
 `settings/user/` is relative to the selected user's home directory. After creating
@@ -360,34 +358,23 @@ configure printing software and does not open an inbound IPP/CUPS port.
 
 ## 3. Rollback
 
-Normal rollback happens from the installed system with:
+`snap-pac` takes a Snapper pre/post snapshot pair around every pacman transaction. There are two ways to go back:
+
+- **Undo one transaction from the running system** with `snapper undochange`, described here.
+- **Replace the whole root with a snapshot** from the rescue environment. See [Choose Root Replacement](#choose-root-replacement). Use this when the system does not boot or when more than one transaction needs to go.
+
+To undo a transaction, list the pairs, reverse the one you want, and rebuild the UKI:
 
 ```bash
-sudo rollback-root
+sudo snapper -c root list --type pre-post
+sudo snapper -c root undochange PRE..POST
+sudo mkinitcpio -P
+sudo systemctl reboot
 ```
 
-What `rollback-root` does:
-
-1. Selects the newest completed pre/post pair in the root Snapper configuration.
-2. Shows `snapper status PRE..POST` for that pair.
-3. Asks for confirmation, including that the consumed snapshots will be deleted.
-4. Runs `snapper -c root undochange PRE..POST`.
-5. Rebuilds UKIs with `mkinitcpio -P`.
-6. Requires the `sbctl` keys, then signs and verifies UKIs.
-7. Deletes the consumed pre/post pair only after undo, UKI rebuilding, signing, and verification succeed.
-8. Instructs you to reboot before continuing to use the system.
-
-The helper is intended for the pre/post pairs created by `snap-pac`, but it does not filter pairs by description or creator. If you create other root Snapper pre/post pairs, the newest completed one will be selected. The command takes no snapshot-number arguments and does not provide an arbitrary-pair selector.
+`mkinitcpio -P` rebuilds the UKI from the reverted files, and the `sbctl` mkinitcpio hook signs it. Reboot before continuing to use the system so the running kernel and userspace match the reverted files. If pacman afterwards reports a stale lock and no pacman process is running, remove `/var/lib/pacman/db.lck`.
 
 This is a file-level reversal, not a pacman-managed downgrade. `snapper undochange` reverses the filesystem difference recorded by the pair. It does not run package downgrade transactions or resolve package dependencies. Only files in the root Snapper configuration are affected; sibling subvolumes such as `@home`, `@var_log`, `@sbctl`, and the ESP are not rolled back. `/var/lib/pacman` is inside `@`, so its database changes are included.
-
-What it does not do:
-
-- It does not create safety snapshots.
-- It does not maintain rollback journals.
-- It does not delete snapshots other than the successfully consumed pair.
-
-If `undochange` succeeds but UKI rebuilding, signing, or verification later fails, the filesystem reversal has already happened and the snapshot pair is retained. Correct the reported boot-artifact problem before rebooting. If only pair deletion fails, the rollback and boot preparation succeeded; delete the retained pair manually using the command printed by `rollback-root`.
 
 Snapper configuration created by the installer:
 
@@ -398,7 +385,7 @@ NUMBER_CLEANUP=no
 EMPTY_PRE_POST_CLEANUP=no
 ```
 
-All snapshots other than a successfully consumed rollback pair are retained until you manually delete them. Running `rollback-root` again selects the previous completed pair, allowing transactions to be undone newest-first.
+All snapshots are retained until you manually delete them.
 
 Delete one snapshot:
 
@@ -416,7 +403,7 @@ sudo snapper -c root delete PRE_NUMBER POST_NUMBER
 
 Use rescue when the installed system cannot boot normally or needs root filesystem repair from outside the running system.
 
-If the installed system still boots, prefer `rollback-root` first. It is narrower: it reverts the newest completed root pre/post pair from inside the running system and is intended for `snap-pac` transactions.
+If the installed system still boots and one pacman transaction caused the problem, prefer `snapper undochange` first (see [Rollback](#3-rollback)). It is narrower: it reverts a single pre/post pair from inside the running system.
 
 Use `rescue-root` when you need an offline repair environment or when the running system is too broken to trust.
 
@@ -536,7 +523,7 @@ Good uses for root replacement:
 
 - A system update made the machine unbootable.
 - A configuration change broke early boot or login.
-- The normal `rollback-root` path is unavailable because the system does not boot.
+- `snapper undochange` is unavailable because the system does not boot.
 - You want the entire root filesystem back at the selected snapshot state.
 
 Do not choose root replacement for a small targeted fix. Use manual repair when you only need to edit a file, rebuild UKIs, inspect logs, or copy data.
@@ -600,7 +587,7 @@ For installations created by this installer, replace `ROOT_DEVICE` with the unlo
 
 Choose `Reinstall OS preserving selected state` when the operating system is beyond repair or beyond trust but the disk, encryption, and Secure Boot setup are intact. It rebuilds a fresh OS in place without repartitioning, without touching the LUKS container, and without firmware Secure Boot Setup Mode — the preserved `@sbctl` keys sign the new boot files.
 
-Prefer the narrower tools when they fit: `rollback-root` for one bad pacman transaction, root replacement for restoring a known-good snapshot, a full fresh install when the disk layout or encryption itself should change or the machine changes hands.
+Prefer the narrower tools when they fit: `snapper undochange` for one bad pacman transaction, root replacement for restoring a known-good snapshot, a full fresh install when the disk layout or encryption itself should change or the machine changes hands.
 
 These subvolumes always survive reinstall:
 
@@ -711,7 +698,6 @@ iso/out/                                          generated ISO output, gitignor
 artifacts/arch-rescue.efi                         generated rescue UKI intermediate, removed after successful ISO build
 iso/airootfs/usr/local/bin/install-arch           live ISO installer launcher
 iso/airootfs/usr/local/bin/rescue-root            live ISO rescue launcher
-settings/rollback/usr/local/sbin/rollback-root    installed rollback helper
 rescue-uki/                                       mkosi rescue UKI definition
 /usr/local/share/arch-new-install                 reinstall payload inside the rescue UKI (packages, settings, shared code, payload-version)
 /root/arch-new-install                            this repo embedded in the live ISO; doubles as the reinstall payload there
