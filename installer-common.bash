@@ -9,85 +9,52 @@ kblayout=us
 locale=en_US.UTF-8
 
 BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
-BTRFS_DATA_MOUNT_OPTIONS="$BTRFS_MOUNT_OPTIONS,nodev,nosuid"
-BTRFS_STRICT_MOUNT_OPTIONS="$BTRFS_DATA_MOUNT_OPTIONS,noexec"
 EFI_MOUNT_OPTIONS="fmask=0137,dmask=0027,nodev,nosuid,noexec"
 RESCUE_UKI_TARGET=/efi/EFI/Linux/arch-rescue.efi
-BTRFS_SUBVOLUMES=(
-    @
-    @snapshots
-    @home
-    @root
-    @var_log
-    @var_cache
-    @var_tmp
-    @docker
-    @containerd
-    @containers
-    @machines
-    @portables
-    @flatpak
-    @libvirt
-    @sbctl
-    @iwd
-    @tailscale
-    @netbird
-    @srv
-)
-BTRFS_SUBVOLUME_MOUNTS=(
-    "@snapshots:/.snapshots"
-    "@home:/home"
-    "@root:/root"
-    "@var_log:/var/log"
-    "@var_cache:/var/cache"
-    "@var_tmp:/var/tmp"
-    "@docker:/var/lib/docker"
-    "@containerd:/var/lib/containerd"
-    "@containers:/var/lib/containers"
-    "@machines:/var/lib/machines"
-    "@portables:/var/lib/portables"
-    "@flatpak:/var/lib/flatpak"
-    "@libvirt:/var/lib/libvirt"
-    "@sbctl:/var/lib/sbctl"
-    "@iwd:/var/lib/iwd"
-    "@tailscale:/var/lib/tailscale"
-    "@netbird:/var/lib/netbird"
-    "@srv:/srv"
-)
-# Rescue reinstall: these always survive; they are what make reinstall
-# possible without Secure Boot Setup Mode or re-enrollment. @home is in
-# neither fixed set because preserving it is a runtime choice.
-BTRFS_PRESERVE_SUBVOLUMES=(
-    @sbctl
-    @iwd
-    @tailscale
-    @netbird
-)
-# Rescue reinstall: these are replaced. @ is renamed aside and retained
-# until the reinstall succeeds; the others are deleted and recreated.
-BTRFS_RECREATE_SUBVOLUMES=(
-    @
-    @snapshots
-    @root
-    @var_log
-    @var_cache
-    @var_tmp
-    @docker
-    @containerd
-    @containers
-    @machines
-    @portables
-    @flatpak
-    @libvirt
-    @srv
+
+# One row per subvolume: name, mountpoint, mount options added to
+# BTRFS_MOUNT_OPTIONS (- for none), and what rescue reinstall does with it:
+#   recreate  deleted and created empty; @ itself is renamed aside and kept
+#             until the reinstall succeeds
+#   keep      always survives; these are what make reinstall possible without
+#             Secure Boot Setup Mode or re-enrollment
+#   ask       the user chooses whether to preserve or erase it
+BTRFS_LAYOUT=(
+    "@            /                    -                    recreate"
+    "@snapshots   /.snapshots          nodev,nosuid,noexec  recreate"
+    "@home        /home                nodev,nosuid         ask"
+    "@root        /root                nodev,nosuid         recreate"
+    "@var_log     /var/log             nodev,nosuid,noexec  recreate"
+    "@var_cache   /var/cache           nodev,nosuid,noexec  recreate"
+    "@var_tmp     /var/tmp             nodev,nosuid         recreate"
+    "@docker      /var/lib/docker      -                    recreate"
+    "@containerd  /var/lib/containerd  -                    recreate"
+    "@containers  /var/lib/containers  -                    recreate"
+    "@machines    /var/lib/machines    -                    recreate"
+    "@portables   /var/lib/portables   -                    recreate"
+    "@flatpak     /var/lib/flatpak     -                    recreate"
+    "@libvirt     /var/lib/libvirt     -                    recreate"
+    "@sbctl       /var/lib/sbctl       nodev,nosuid,noexec  keep"
+    "@iwd         /var/lib/iwd         nodev,nosuid,noexec  keep"
+    "@tailscale   /var/lib/tailscale   nodev,nosuid,noexec  keep"
+    "@netbird     /var/lib/netbird     nodev,nosuid,noexec  keep"
+    "@srv         /srv                 nodev,nosuid         recreate"
 )
 
+# Prints the subvolume names whose reinstall policy is one of the arguments.
+layout_subvolumes() {
+    local row subvolume mountpoint options policy
+
+    for row in "${BTRFS_LAYOUT[@]}"; do
+        read -r subvolume mountpoint options policy <<<"$row"
+        if [[ " $* " == *" $policy "* ]]; then
+            printf '%s\n' "$subvolume"
+        fi
+    done
+}
+
 have_network() {
-    if command -v curl &>/dev/null; then
-        curl --silent --max-time 5 https://archlinux.org >/dev/null 2>&1
-    else
-        ping -c 1 -W 5 archlinux.org &>/dev/null
-    fi
+    curl --silent --max-time 5 https://archlinux.org >/dev/null 2>&1
 }
 
 show_wifi_instructions() {
@@ -167,64 +134,20 @@ partition_path() {
     fi
 }
 
-detect_microcode() {
-    cpu_vendor=$(grep -m1 vendor_id /proc/cpuinfo | awk '{print $3}')
-    if [[ "$cpu_vendor" == "AuthenticAMD" ]]; then
-        microcode="amd-ucode"
-    else
-        microcode="intel-ucode"
-    fi
-}
-
-detect_gpu_package_files() {
-    local gpu_info
-
-    gpu_info=$(lspci | grep -E "VGA|3D" || true)
-    gpu_package_files=()
-    gpu_label="none"
-
-    if grep -qi intel <<<"$gpu_info"; then
-        gpu_package_files+=(packages/desktop-driver-intel.conf)
-        gpu_label="Intel"
-    fi
-
-    if grep -qi amd <<<"$gpu_info"; then
-        gpu_package_files+=(packages/desktop-driver-amd.conf)
-        if [[ "$gpu_label" == "Intel" ]]; then
-            gpu_label="Intel + AMD"
-        else
-            gpu_label="AMD"
-        fi
-    fi
-}
-
 target_chroot() {
     arch-chroot /mnt "$@"
 }
 
-copy_settings_file() {
-    local subsystem=$1
-    local target=$2
-    local mode=${3:-0644}
+# Each settings/<subsystem>/ directory is a partial root filesystem. Files are
+# installed 0644, or 0755 when executable, whatever the checkout's umask was.
+install_settings_tree() {
+    local tree=$1 source mode
 
-    copy_settings_source "$subsystem/${target#/}" "$target" "$mode"
-}
-
-copy_settings_source() {
-    local source=$1
-    local target=$2
-    local mode=${3:-0644}
-
-    install -D -m "$mode" "$SETTINGS_DIR/$source" "/mnt$target"
-}
-
-append_settings_file() {
-    local subsystem=$1
-    local target=$2
-
-    install -d -m 0755 "$(dirname "/mnt$target")"
-    touch "/mnt$target"
-    append_unique_lines "$SETTINGS_DIR/$subsystem/${target#/}" "$target"
+    while IFS= read -r -d '' source; do
+        mode=0644
+        [[ -x "$source" ]] && mode=0755
+        install -D -m "$mode" "$source" "/mnt${source#"$tree"}"
+    done < <(find "$tree" -type f -print0)
 }
 
 install_user_settings() {
@@ -250,56 +173,10 @@ install_user_settings() {
     done
 }
 
-enable_target_service() {
-    local output
-
-    if ! output=$(systemctl --root=/mnt enable "$1" 2>&1); then
-        show_error "Failed to enable $1: $output"
-        return 1
-    fi
-}
-
-mask_target_unit() {
-    systemctl --root=/mnt mask "$1" &>/dev/null || true
-}
-
-write_target_file() {
-    local path=$1
-    local mode=$2
-    local tmp
-
-    tmp=$(mktemp)
-    cat >"$tmp"
-    install -D -m "$mode" "$tmp" "/mnt$path"
-    rm -f "$tmp"
-}
-
-append_unique_lines() {
-    local source=$1
-    local target=$2
-
-    while IFS= read -r line; do
-        [[ -n "$line" ]] || continue
-        grep -qxF "$line" "/mnt$target" || printf '%s\n' "$line" >>"/mnt$target"
-    done <"$source"
-}
-
 collect_selected_packages() {
-    local file
-
-    selected_package_files=(packages/base.conf packages/desktop-base.conf packages/desktop-custom.conf)
-    selected_package_files+=("${gpu_package_files[@]}")
-
-    for file in "${selected_package_files[@]}"; do
-        if [[ ! -f "$SCRIPT_DIR/$file" ]]; then
-            show_error "Missing package file: $SCRIPT_DIR/$file"
-            exit 1
-        fi
-    done
-
-    mapfile -t selected_packages < <(awk 'NF && $1 !~ /^#/ { print $1 }' "${selected_package_files[@]/#/$SCRIPT_DIR/}" | sort -u)
+    mapfile -t selected_packages < <(awk 'NF && $1 !~ /^#/ { print $1 }' "$SCRIPT_DIR"/packages/*.conf | sort -u)
     if (( ${#selected_packages[@]} == 0 )); then
-        show_error "No packages found in: ${selected_package_files[*]}"
+        show_error "No packages found in $SCRIPT_DIR/packages"
         exit 1
     fi
 }
@@ -307,27 +184,11 @@ collect_selected_packages() {
 preflight_validate_packages() {
     local packages=("${selected_packages[@]}" snap-pac)
 
-    show_info "Validating ${#packages[@]} package names from: ${selected_package_files[*]} plus deferred snap-pac"
+    show_info "Validating ${#packages[@]} package names from $SCRIPT_DIR/packages plus deferred snap-pac"
     if ! pacman -Sp --print-format '%n' "${packages[@]}" >/dev/null; then
         show_error "Unresolvable package names found. Fix the package files and re-run."
         exit 1
     fi
-}
-
-btrfs_mount_options_for() {
-    local mountpoint=$1
-
-    case "$mountpoint" in
-        /.snapshots|/var/log|/var/cache|/var/lib/sbctl|/var/lib/iwd|/var/lib/tailscale|/var/lib/netbird)
-            printf '%s\n' "$BTRFS_STRICT_MOUNT_OPTIONS"
-            ;;
-        /home|/root|/var/tmp|/srv)
-            printf '%s\n' "$BTRFS_DATA_MOUNT_OPTIONS"
-            ;;
-        *)
-            printf '%s\n' "$BTRFS_MOUNT_OPTIONS"
-            ;;
-    esac
 }
 
 # Signs in place, or to a separate output file when one is given. -s records
@@ -337,15 +198,14 @@ sign_target_file() {
 }
 
 mount_target_layout() {
-    local subvolume_mount subvolume mountpoint mount_options
+    local row subvolume mountpoint options policy
 
-    mount -o "$BTRFS_MOUNT_OPTIONS,subvol=@" "$root_device" /mnt
-    for subvolume_mount in "${BTRFS_SUBVOLUME_MOUNTS[@]}"; do
-        subvolume=${subvolume_mount%%:*}
-        mountpoint=${subvolume_mount#*:}
-        mount_options=$(btrfs_mount_options_for "$mountpoint")
-        install -d -m 0755 "/mnt$mountpoint"
-        mount -o "$mount_options,subvol=$subvolume" "$root_device" "/mnt$mountpoint"
+    # @ is the first row, so / is mounted before the mountpoints inside it.
+    for row in "${BTRFS_LAYOUT[@]}"; do
+        read -r subvolume mountpoint options policy <<<"$row"
+        [[ "$options" == - ]] && options=
+        install -d -m 0755 "/mnt${mountpoint%/}"
+        mount -o "$BTRFS_MOUNT_OPTIONS${options:+,$options},subvol=$subvolume" "$root_device" "/mnt${mountpoint%/}"
     done
     chmod 0700 /mnt/root
     chmod 1777 /mnt/var/tmp
@@ -353,52 +213,37 @@ mount_target_layout() {
     mount -o "$EFI_MOUNT_OPTIONS" "$efi_part" /mnt/efi
 }
 
-install_selected_packages() {
-    show_info "Installing ${#selected_packages[@]} packages into the target"
-    target_chroot pacman -S --needed --noconfirm "${selected_packages[@]}"
-}
+setup_snapper() {
+    show_info "Configuring Snapper"
 
-setup_snapper_rollback() {
-    show_info "Configuring Snapper rollback"
-
-    umount /mnt/.snapshots
-    rmdir /mnt/.snapshots
-    target_chroot snapper --no-dbus -c root create-config /
-    target_chroot btrfs subvolume delete /.snapshots
-
-    install -d -m 0750 /mnt/.snapshots
-    mount -o "$(btrfs_mount_options_for /.snapshots),subvol=@snapshots" "$root_device" /mnt/.snapshots
+    # The same result as `snapper create-config /`, without the nested
+    # .snapshots subvolume it would create: @snapshots is already mounted there.
+    install -m 0640 /mnt/usr/share/snapper/config-templates/default /mnt/etc/snapper/configs/root
+    sed -Ei 's/^(TIMELINE_CREATE|TIMELINE_CLEANUP|NUMBER_CLEANUP|EMPTY_PRE_POST_CLEANUP)=.*/\1="no"/' \
+        /mnt/etc/snapper/configs/root
+    sed -i 's/^SNAPPER_CONFIGS=.*/SNAPPER_CONFIGS="root"/' /mnt/etc/conf.d/snapper
     chmod 0750 /mnt/.snapshots
 
-    target_chroot snapper --no-dbus -c root set-config \
-        TIMELINE_CREATE=no \
-        TIMELINE_CLEANUP=no \
-        NUMBER_CLEANUP=no \
-        EMPTY_PRE_POST_CLEANUP=no
-    systemctl --root=/mnt disable snapper-timeline.timer
-    target_chroot snapper --no-dbus -c root get-config >/dev/null
-
-    # Install snap-pac only after Snapper's root config and sibling
-    # @snapshots mount are in place, so installer pacman work is not captured.
+    # Install snap-pac only after Snapper's root config is in place, so
+    # installer pacman work is not captured.
     target_chroot pacman -S --needed --noconfirm snap-pac
 }
 
 # Installs and configures the OS into the mounted target layout. Shared by
 # fresh install and rescue reinstall, so both paths build the same system.
 install_target_system() {
-    detect_microcode
     show_section "Base System"
-    show_info "Installing base system with pacstrap"
+    show_info "Installing the base system and ${#selected_packages[@]} packages with pacstrap"
+    # Both microcode packages are installed; mkinitcpio's microcode hook
+    # embeds only the one that matches the CPU.
     pacstrap -K /mnt \
-        base base-devel linux linux-headers "$microcode" linux-firmware
+        base base-devel linux linux-headers linux-firmware intel-ucode amd-ucode \
+        "${selected_packages[@]}"
 
     show_info "Generating fstab"
     genfstab -U /mnt >/mnt/etc/fstab
 
     root_uuid=$(blkid -s UUID -o value "$root_part")
-
-    show_section "Package Installation"
-    install_selected_packages
 
     show_section "System Configuration"
     show_info "Configuring target system"
@@ -408,16 +253,9 @@ install_target_system() {
 # The fresh-install-only steps (rescue UKI copy, LUKS token enrollment, Secure
 # Boot key creation/enrollment) stay in install.bash.
 configure_target_system() {
-    local firewall_profile
+    local tree profile crypt_options
 
     printf '%s\n' "$hostname" >/mnt/etc/hostname
-
-    write_target_file /etc/hosts 0644 <<EOF
-127.0.0.1   localhost
-::1         localhost
-127.0.1.1   $hostname.localdomain   $hostname
-EOF
-
     sed -i "/^#$locale/s/^#//" /mnt/etc/locale.gen
     printf 'LANG=%s\n' "$locale" >/mnt/etc/locale.conf
     printf 'KEYMAP=%s\n' "$kblayout" >/mnt/etc/vconsole.conf
@@ -425,124 +263,49 @@ EOF
     target_chroot hwclock --systohc || show_warn "hwclock --systohc failed; set the hardware clock manually after install"
     target_chroot locale-gen >/dev/null
 
-    install -d -m 0755 /mnt/etc/systemd/network
-    install -d -m 0755 /mnt/etc/systemd/system/systemd-networkd-wait-online.service.d
-    copy_settings_file network /etc/systemd/network/20-wired.network
-    copy_settings_file network /etc/systemd/system/systemd-networkd-wait-online.service.d/wait-for-only-one-interface.conf
-    copy_settings_file network /etc/systemd/networkd.conf
-
-    install -d -m 0755 /mnt/etc/iwd /mnt/etc/systemd/system/iwd.service.d
-    copy_settings_file network /etc/systemd/network/25-wireless.network
-    copy_settings_file network /etc/systemd/network/30-wireless.network
-    copy_settings_file network /etc/iwd/main.conf
-    copy_settings_file network /etc/systemd/system/iwd.service.d/override.conf
-    enable_target_service iwd.service
-
-    copy_settings_file network /etc/systemd/resolved.conf
-    enable_target_service systemd-networkd.service
-    enable_target_service systemd-resolved.service
-    enable_target_service systemd-timesyncd.service
-    enable_target_service systemd-networkd-wait-online.service
-
-    for firewall_profile in blackout drop general; do
-        copy_settings_file network "/usr/local/share/firewall-profiles/$firewall_profile.nft"
-        target_chroot nft --check --file "/usr/local/share/firewall-profiles/$firewall_profile.nft"
+    # settings/user is installed per user below; settings/optional holds the
+    # files that depend on an installer prompt.
+    for tree in "$SETTINGS_DIR"/*/; do
+        case "$tree" in
+            */optional/ | */user/) ;;
+            *) install_settings_tree "${tree%/}" ;;
+        esac
     done
-    copy_settings_source network/usr/local/share/firewall-profiles/drop.nft /etc/nftables.conf
-    copy_settings_file network /usr/local/sbin/firewall-profile 0755
-    enable_target_service nftables.service
-
-    copy_settings_file network /etc/sysctl.d/99-firewall-settings.conf
-    copy_settings_file power /etc/sysctl.d/99-watchdog-settings.conf
-    copy_settings_file power /etc/sysctl.d/99-zram-settings.conf
-    copy_settings_file security /etc/sysctl.d/99-hardening.conf
-    copy_settings_file security /etc/modprobe.d/blacklist.conf
-    copy_settings_file security /etc/modprobe.d/disable-firewire.conf
-    copy_settings_file security /etc/modprobe.d/disable-intel-mei.conf
-    copy_settings_file hardware /etc/modprobe.d/iwlwifi.conf
-    copy_settings_file security /etc/modprobe.d/security-blacklist.conf
-    copy_settings_file security /etc/audit/auditd.conf
-    copy_settings_file security /etc/audit/rules.d/10-arch-base.rules
-    copy_settings_file security /etc/systemd/system.conf.d/60-disable-coredump.conf
-    copy_settings_file security /etc/systemd/user.conf.d/60-disable-coredump.conf
-    copy_settings_file security /etc/security/limits.d/60-disable-coredump.conf
-    copy_settings_file access /etc/polkit-1/rules.d/00-udisks-wheel.rules
-
-    install -d -m 0755 /mnt/etc/apparmor/earlypolicy
-    install -d -m 0755 /mnt/etc/apparmor.d/local
-    touch /mnt/etc/apparmor/parser.conf
-    append_settings_file security /etc/apparmor/parser.conf
-    enable_target_service apparmor.service
-    enable_target_service auditd.service
-
     if [[ "$disable_bluetooth" == "yes" ]]; then
-        copy_settings_file hardware /etc/modprobe.d/disable-bluetooth.conf
+        install -m 0644 "$SETTINGS_DIR/optional/etc/modprobe.d/disable-bluetooth.conf" /mnt/etc/modprobe.d/
     fi
-
     if [[ "$disable_thunderbolt" == "yes" ]]; then
-        copy_settings_file hardware /etc/modprobe.d/disable-thunderbolt.conf
+        install -m 0644 "$SETTINGS_DIR/optional/etc/modprobe.d/disable-thunderbolt.conf" /mnt/etc/modprobe.d/
     fi
+    chmod 0440 /mnt/etc/sudoers.d/wheel
+    install -d -m 0755 /mnt/etc/apparmor/earlypolicy
 
-    copy_settings_file hardware /etc/fwupd/fwupd.conf
+    for profile in /mnt/usr/local/share/firewall-profiles/*.nft; do
+        target_chroot nft --check --file "${profile#/mnt}"
+    done
+    install -m 0644 /mnt/usr/local/share/firewall-profiles/drop.nft /mnt/etc/nftables.conf
 
-    copy_settings_file power /etc/systemd/zram-generator.conf
-
-    copy_settings_file power /etc/systemd/logind.conf.d/no-sleep.conf
-    copy_settings_file power /etc/systemd/sleep.conf.d/no-sleep.conf
-    mask_target_unit suspend.target
-    mask_target_unit hibernate.target
-    mask_target_unit hybrid-sleep.target
-    mask_target_unit suspend-then-hibernate.target
+    systemctl --root=/mnt --quiet enable \
+        iwd.service systemd-networkd.service systemd-networkd-wait-online.service \
+        systemd-resolved.service systemd-timesyncd.service nftables.service \
+        apparmor.service auditd.service tailscaled.service pcscd.service \
+        fstrim.timer systemd-boot-update.service
 
     sed -Ei 's/^#(Color)$/\1\nILoveCandy/;s/^#(ParallelDownloads).*/\1 = 10/' /mnt/etc/pacman.conf
 
-    if target_chroot getent group polkitd >/dev/null; then
-        target_chroot chown root:polkitd /etc/polkit-1/rules.d
-        target_chroot chmod 0750 /etc/polkit-1/rules.d
-        target_chroot chown root:polkitd /etc/polkit-1/rules.d/00-udisks-wheel.rules
-        target_chroot chmod 0640 /etc/polkit-1/rules.d/00-udisks-wheel.rules
-    fi
-
-    install -d -m 0755 /mnt/boot /mnt/efi/EFI/Linux /mnt/efi/loader /mnt/etc/cmdline.d /mnt/etc/mkinitcpio.d
-    copy_settings_file boot /efi/loader/loader.conf
-
-    copy_settings_file boot /etc/cmdline.d/defaults.conf
-    copy_settings_file boot /etc/cmdline.d/security.conf
-    copy_settings_file boot /etc/cmdline.d/iommu.conf
-    copy_settings_file boot /etc/cmdline.d/filesystem.conf
-
-    if [[ "$cpu_vendor" != "AuthenticAMD" ]]; then
-        copy_settings_file boot /etc/cmdline.d/intel.conf
-    fi
-
-    copy_settings_file boot /etc/cmdline.d/lockdown.conf
-
     case "$unlock_method" in
-        tpm2)
-            printf 'cryptroot  UUID=%s  none  tpm2-device=auto,password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
-            ;;
-        fido2)
-            printf 'cryptroot  UUID=%s  none  fido2-device=auto,password-echo=no,x-systemd.device-timeout=30,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
-            ;;
-        passphrase)
-            printf 'cryptroot  UUID=%s  none  password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' "$root_uuid" >/mnt/etc/crypttab.initramfs
-            ;;
+        tpm2) crypt_options="tpm2-device=auto,x-systemd.device-timeout=0" ;;
+        fido2) crypt_options="fido2-device=auto,x-systemd.device-timeout=30" ;;
+        passphrase) crypt_options="x-systemd.device-timeout=0" ;;
     esac
-    printf 'root=/dev/mapper/cryptroot\n' >/mnt/etc/cmdline.d/root.conf
-    copy_settings_source boot/etc/mkinitcpio.conf.encrypted /etc/mkinitcpio.conf
-
-    copy_settings_file boot /etc/mkinitcpio.d/linux.preset
+    printf 'cryptroot  UUID=%s  none  %s,password-echo=no,timeout=0,no-read-workqueue,no-write-workqueue,discard\n' \
+        "$root_uuid" "$crypt_options" >/mnt/etc/crypttab.initramfs
 
     # Drop initramfs images generated by the stock presets during pacstrap;
     # nothing references them once the UKI presets take over.
     rm -f /mnt/boot/initramfs-*.img
 
     target_chroot mkinitcpio -P
-
-    enable_target_service tailscaled.service
-    enable_target_service pcscd.service
-    enable_target_service fstrim.timer
-    enable_target_service systemd-boot-update.service
 
     if ! target_chroot id -u "$username" &>/dev/null; then
         target_chroot useradd -m -G users,wheel -s /bin/bash "$username"
@@ -554,9 +317,7 @@ EOF
 
     printf '%s:%s\n' "$username" "$userpass" | target_chroot chpasswd
 
-    copy_settings_file access /etc/sudoers.d/wheel 0440
-
-    setup_snapper_rollback
+    setup_snapper
     target_chroot passwd -l root >/dev/null
 }
 
@@ -614,33 +375,4 @@ delete_boot_entries_by_label() {
             sub(/\t.*$/, "", line)
             if (line == label) { sub(/^Boot/, "", token); sub(/\*.*/, "", token); print token }
         }')
-}
-
-manage_efi_boot_entries() {
-    local entries entry boot_num
-
-    show_section "EFI Boot Entries"
-    efibootmgr --unicode || true
-
-    while true; do
-        entries=$(efibootmgr --unicode 2>/dev/null | awk '$1 ~ /^Boot[0-9A-Fa-f]{4}\*?$/ { print }' || true)
-
-        if [[ -z "$entries" ]]; then
-            show_info "No EFI boot entries found"
-            break
-        fi
-
-        entry=$(printf 'Skip\n%s\n' "$entries" | gum choose --header "Select EFI boot entry to delete, or Skip:")
-
-        if [[ "$entry" == "Skip" ]]; then
-            break
-        fi
-
-        boot_num=$(awk '{ token = $1; if (token ~ /^Boot[0-9A-Fa-f]{4}\*?$/) { sub(/^Boot/, "", token); sub(/\*$/, "", token); print token } }' <<<"$entry")
-
-        if [[ -n "$boot_num" ]] && gum confirm "Delete EFI boot entry Boot$boot_num?"; then
-            efibootmgr --bootnum "$boot_num" --delete-bootnum --unicode
-            show_info "Deleted EFI boot entry Boot$boot_num"
-        fi
-    done
 }

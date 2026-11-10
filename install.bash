@@ -47,16 +47,6 @@ sed -Ei 's/^#?(ParallelDownloads).*/\1 = 10/' /etc/pacman.conf
 echo "Refreshing pacman databases and archlinux-keyring"
 pacman -Sy --needed --noconfirm archlinux-keyring
 
-deps_needed=()
-for dep in gum iwctl cryptsetup efibootmgr sfdisk wipefs blkdiscard partprobe mkfs.fat mkfs.btrfs btrfs lspci pacstrap arch-chroot genfstab; do
-    command -v "$dep" &>/dev/null || deps_needed+=("$dep")
-done
-
-if [[ ${#deps_needed[@]} -gt 0 ]]; then
-    echo "Installing live environment dependencies: ${deps_needed[*]}"
-    pacman -S --needed --noconfirm gum iwd cryptsetup efibootmgr util-linux dosfstools btrfs-progs parted pciutils arch-install-scripts
-fi
-
 UI_ACCENT=212
 UI_ACTION=214
 UI_SUCCESS=82
@@ -190,14 +180,11 @@ enroll_unlock_and_secure_boot() {
     esac
 
     show_section "Secure Boot Enrollment"
-    if target_chroot sbctl status | grep -q 'Setup Mode:.*Enabled'; then
-        target_chroot sbctl create-keys
-        target_chroot sbctl enroll-keys -m
-        install_and_sign_boot_manager
-    else
-        show_error "Secure Boot is not in setup mode"
-        exit 1
-    fi
+    # Setup Mode was verified before any disk work; enroll-keys fails if the
+    # firmware has left it since.
+    target_chroot sbctl create-keys
+    target_chroot sbctl enroll-keys -m
+    install_and_sign_boot_manager
 
     finalize_target_dns
 }
@@ -242,7 +229,6 @@ while true; do
     fi
 done
 
-detect_gpu_package_files
 collect_selected_packages
 preflight_validate_packages
 preflight_validate_rescue_uki
@@ -268,10 +254,6 @@ show_action "DESTRUCTIVE OPERATION" \
 if ! gum confirm "Erase $target_disk and begin installation?"; then
     show_info "Installation cancelled"
     exit 0
-fi
-
-if gum confirm "Review/delete existing EFI firmware boot entries before install?"; then
-    manage_efi_boot_entries
 fi
 
 if findmnt -rn /mnt >/dev/null 2>&1; then
@@ -303,15 +285,9 @@ efi_part=$(partition_path "$target_disk" 1)
 root_part=$(partition_path "$target_disk" 2)
 
 show_info "Formatting ESP $efi_part"
-wipefs --all "$efi_part"
 mkfs.fat -F 32 -n EFI "$efi_part"
 
-show_info "Preparing root partition $root_part"
-if cryptsetup isLuks "$root_part"; then
-    cryptsetup -q erase "$root_part"
-fi
-wipefs --all "$root_part" 2>/dev/null || true
-
+show_info "Encrypting root partition $root_part"
 printf '%s' "$userpass" | cryptsetup -q -c aes-xts-plain64 -s 512 -h sha512 luksFormat "$root_part" -d -
 printf '%s' "$userpass" | cryptsetup open "$root_part" cryptroot -d -
 root_device=/dev/mapper/cryptroot
@@ -320,9 +296,9 @@ mkfs.btrfs -f -L linux "$root_device"
 
 show_info "Mounting target filesystems"
 mount "$root_device" /mnt
-for subvolume in "${BTRFS_SUBVOLUMES[@]}"; do
+while read -r subvolume; do
     btrfs subvolume create "/mnt/$subvolume"
-done
+done < <(layout_subvolumes recreate keep ask)
 umount /mnt
 
 mount_target_layout

@@ -320,9 +320,9 @@ preflight_verify_layout() {
     local subvolume
     local -a missing=()
 
-    for subvolume in @ @home "${BTRFS_PRESERVE_SUBVOLUMES[@]}"; do
+    while read -r subvolume; do
         [[ -d "/mnt/$subvolume" ]] || missing+=("$subvolume")
-    done
+    done < <(printf '@\n'; layout_subvolumes keep ask)
     if (( ${#missing[@]} > 0 )); then
         die "Missing subvolumes: ${missing[*]}. This is not a system created by this installer; reinstall supports only installer-created layouts."
     fi
@@ -448,8 +448,6 @@ reinstall_preserving_state() {
     show_info 'Refreshing archlinux-keyring in the rescue environment'
     pacman -Sy --needed --noconfirm archlinux-keyring
 
-    detect_gpu_package_files
-    show_info "GPU driver selection: $gpu_label"
     collect_selected_packages
     preflight_validate_packages
 
@@ -458,8 +456,8 @@ reinstall_preserving_state() {
     detect_enrolled_unlock_method
 
     local -a effective_preserve effective_recreate
-    effective_preserve=("${BTRFS_PRESERVE_SUBVOLUMES[@]}")
-    effective_recreate=("${BTRFS_RECREATE_SUBVOLUMES[@]}")
+    mapfile -t effective_preserve < <(layout_subvolumes keep)
+    mapfile -t effective_recreate < <(layout_subvolumes recreate)
     if [[ "$erase_home" == yes ]]; then
         effective_recreate+=(@home)
     else

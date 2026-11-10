@@ -243,21 +243,21 @@ Package customization:
 packages/base.conf                  base CLI, network, security, backup, utility packages
 packages/desktop-base.conf          desktop common packages, fonts, audio, browser, firmware tools
 packages/desktop-custom.conf        compositor/session/window-manager packages
-packages/desktop-driver-intel.conf  Intel GPU packages, installed when Intel graphics are detected
-packages/desktop-driver-amd.conf    AMD GPU packages, installed when AMD graphics are detected
+packages/desktop-drivers.conf       Intel and AMD GPU packages, always installed
 ```
 
-Each package file is plain text. One package per line. Blank lines and lines beginning with `#` are ignored. Package names are validated before destructive disk work starts.
+Every `packages/*.conf` file is installed; add a file to add a group. Each file is plain text, one package per line. Blank lines and lines beginning with `#` are ignored. Package names are validated before destructive disk work starts. Both `intel-ucode` and `amd-ucode` are installed with the base system; the initramfs embeds only the one that matches the CPU.
 
 Settings customization:
 
 ```text
 settings/access/       sudo and polkit policy
 settings/boot/         kernel command line, mkinitcpio config, UKI preset
-settings/hardware/     Bluetooth, Thunderbolt, Wi-Fi, and fwupd configuration
+settings/hardware/     Wi-Fi and fwupd configuration
 settings/network/      networkd, resolved, iwd, nftables, and network sysctls
 settings/power/        sleep, watchdog, and zram policy
 settings/security/     AppArmor, coredumps, kernel sysctls, and module policy
+settings/optional/     files installed only when a prompt asks for them (Bluetooth and Thunderbolt blocks)
 settings/user/         home-relative niri and mango configuration defaults
 ```
 
@@ -709,11 +709,10 @@ Boot-related installed paths:
 /etc/cmdline.d/defaults.conf
 /etc/cmdline.d/security.conf
 /etc/cmdline.d/iommu.conf
-/etc/cmdline.d/filesystem.conf
-/etc/cmdline.d/intel.conf          installed on non-AMD CPUs
+/etc/cmdline.d/filesystem.conf     root device, filesystem type, and @ subvolume
 /etc/cmdline.d/lockdown.conf       always installed for lockdown=integrity
-/etc/cmdline.d/root.conf           generated during install
-/etc/mkinitcpio.conf               installed from encrypted variant
+/etc/crypttab.initramfs            generated during install for the chosen unlock method
+/etc/mkinitcpio.conf
 /etc/mkinitcpio.d/linux.preset
 /etc/fwupd/fwupd.conf              configured for custom Secure Boot keys
 /efi/EFI/systemd/systemd-bootx64.efi
