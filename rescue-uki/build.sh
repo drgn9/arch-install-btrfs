@@ -1,30 +1,19 @@
 #!/usr/bin/env bash
 
+# Builds the rescue UKI with mkosi and writes it to artifacts/arch-rescue.efi.
+# Run as root on an Arch Linux machine: sudo ./rescue-uki/build.sh
+
 set -Eeuo pipefail
 umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-ARTIFACT_DIR="$REPO_DIR/artifacts"
-ARTIFACT="$ARTIFACT_DIR/arch-rescue.efi"
+ARTIFACT="$REPO_DIR/artifacts/arch-rescue.efi"
 ROOTPW_FILE="$SCRIPT_DIR/mkosi.rootpw"
-RESCUE_SOURCE="$REPO_DIR/iso/airootfs/usr/local/bin/rescue-root"
-RESCUE_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/bin/rescue-root"
-PAYLOAD_OVERLAY="$SCRIPT_DIR/mkosi.extra/usr/local/share/arch-new-install"
-
-# The rescue image is built with a pinned mkosi version so builds do not
-# silently change behavior when the build machine upgrades its mkosi package.
-# Bump MKOSI_VERSION deliberately after reading the mkosi release notes.
-MKOSI_VERSION=27.1
-MKOSI_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/arch-new-install/mkosi/v$MKOSI_VERSION"
 WORK_DIR=
 
 cleanup() {
     rm -f "$ROOTPW_FILE"
-    rm -f "$RESCUE_OVERLAY"
-    rm -rf "$PAYLOAD_OVERLAY"
-    # The cache bind mount exists only in the child mount namespace, which
-    # has exited before this cleanup runs. This never removes host packages.
     if [[ -n "$WORK_DIR" ]]; then
         rm -rf "$WORK_DIR"
     fi
@@ -40,24 +29,7 @@ fi
 
 echo "Installing build dependencies..."
 pacman -S --needed --noconfirm \
-    archiso rsync python python-pefile openssl git util-linux \
-    systemd-ukify kmod libarchive cpio zstd
-
-if [[ ! -f "$RESCUE_SOURCE" ]]; then
-    echo "ERROR: Missing rescue script: $RESCUE_SOURCE" >&2
-    exit 1
-fi
-
-# shellcheck source-path=SCRIPTDIR source=../build-common.bash
-source "$REPO_DIR/build-common.bash"
-init_build_package_cache
-echo "Using shared pacman package cache: $PACKAGE_CACHE_DIR"
-
-# Keep unpacked images off /tmp's size-limited tmpfs. Only package archives
-# persist across builds; metadata, output, and build roots are temporary.
-WORK_DIR=$(mktemp -d /var/tmp/arch-new-install-rescue.XXXXXX)
-MKOSI_PACKAGE_CACHE="$WORK_DIR/pkgcache"
-mkdir -p "$MKOSI_PACKAGE_CACHE/cache/pacman/pkg"
+    mkosi python-pefile openssl git systemd-ukify kmod libarchive cpio zstd
 
 read_secret() {
     local prompt=$1
@@ -86,52 +58,30 @@ if [[ "$password" != "$password_confirm" ]]; then
     exit 1
 fi
 
-hashed_password=$(printf '%s' "$password" | openssl passwd -6 -stdin)
+# mkosi reads the root password from mkosi.rootpw next to its configuration.
+printf 'hashed:%s\n' "$(printf '%s' "$password" | openssl passwd -6 -stdin)" >"$ROOTPW_FILE"
 unset password password_confirm
 
-printf 'hashed:%s\n' "$hashed_password" >"$ROOTPW_FILE"
-chmod 0600 "$ROOTPW_FILE"
-unset hashed_password
+# Keep unpacked images off /tmp's size-limited tmpfs. mkosi keeps its own
+# package cache between builds; output and build roots are temporary.
+WORK_DIR=$(mktemp -d /var/tmp/arch-new-install-rescue.XXXXXX)
 
-install -D -m 0755 "$RESCUE_SOURCE" "$RESCUE_OVERLAY"
-
-# Rescue reinstall payload: package lists, static settings, and shared
-# installer code, frozen into the image at build time. The version file
-# lets the reinstall action print how old its embedded payload is.
-rm -rf "$PAYLOAD_OVERLAY"
-install -d -m 0755 "$PAYLOAD_OVERLAY"
-cp -r "$REPO_DIR/packages" "$PAYLOAD_OVERLAY/packages"
-cp -r "$REPO_DIR/settings" "$PAYLOAD_OVERLAY/settings"
-install -m 0644 "$REPO_DIR/installer-common.bash" "$PAYLOAD_OVERLAY/installer-common.bash"
+# The version stamp lets the reinstall action print how old its embedded
+# payload is. The payload itself is listed under ExtraTrees= in mkosi.conf.
+install -d -m 0755 "$WORK_DIR/payload"
 payload_revision=$(git -C "$REPO_DIR" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
 printf 'built %s from revision %s\n' "$(date --utc +%Y-%m-%dT%H:%M:%SZ)" "$payload_revision" \
-    >"$PAYLOAD_OVERLAY/payload-version"
+    >"$WORK_DIR/payload/payload-version"
+chmod 0644 "$WORK_DIR/payload/payload-version"
 
-rm -rf "$SCRIPT_DIR/mkosi.output"
 rm -f "$ARTIFACT"
 
-if [[ ! -d "$MKOSI_HOME" ]]; then
-    echo "Downloading mkosi v$MKOSI_VERSION (one-time download; cached for future builds)..."
-    git clone --depth 1 --branch "v$MKOSI_VERSION" https://github.com/systemd/mkosi "$MKOSI_HOME"
-fi
-
 echo "Building rescue UKI..."
-# Mount only the package archives into mkosi's cache layout. Using /var as
-# PackageCacheDirectory would also share the host's repository databases.
-# The private namespace contains the mount even if the build fails, and
-# exec ensures it is gone before the parent removes the temporary tree.
-# shellcheck disable=SC2016 # Arguments expand in the child shell.
-PYTHONPATH="$MKOSI_HOME" unshare --mount --propagation private -- bash -Eeuo pipefail -c '
-    mount --bind "$1" "$2/cache/pacman/pkg"
-    exec python3 -m mkosi -C "$3" \
-        --package-cache-dir="$2" \
-        --workspace-directory="$4" \
-        --output-directory="$4/output" \
-        --cache-directory= \
-        --incremental=no \
-        --history=no \
-        build
-' bash "$PACKAGE_CACHE_DIR" "$MKOSI_PACKAGE_CACHE" "$SCRIPT_DIR" "$WORK_DIR"
+mkosi -C "$SCRIPT_DIR" \
+    --extra-tree="$WORK_DIR/payload:/usr/local/share/arch-new-install" \
+    --workspace-directory="$WORK_DIR" \
+    --output-directory="$WORK_DIR/output" \
+    build
 
 shopt -s nullglob
 uki_outputs=("$WORK_DIR"/output/*.efi)

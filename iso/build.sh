@@ -14,7 +14,6 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 OUT_DIR="$SCRIPT_DIR/out"
 RELENG_DIR=/usr/share/archiso/configs/releng
 RESCUE_UKI_ARTIFACT="$REPO_DIR/artifacts/arch-rescue.efi"
-RESCUE_UKI_DIR="$REPO_DIR/rescue-uki"
 
 if [[ ${EUID:-0} -ne 0 ]]; then
     echo "ERROR: This script must be run as root (mkarchiso requires it)." >&2
@@ -22,51 +21,12 @@ if [[ ${EUID:-0} -ne 0 ]]; then
 fi
 
 echo "Installing build dependencies..."
-pacman -S --needed --noconfirm \
-    archiso rsync python python-pefile openssl git util-linux \
-    systemd-ukify kmod libarchive cpio zstd
+pacman -S --needed --noconfirm archiso rsync git
 
 if [[ ! -d "$RELENG_DIR" ]]; then
     echo "ERROR: $RELENG_DIR not found. Is the archiso package installed correctly?" >&2
     exit 1
 fi
-
-# shellcheck source-path=SCRIPTDIR source=../build-common.bash
-source "$REPO_DIR/build-common.bash"
-init_build_package_cache
-echo "Using shared pacman package cache: $PACKAGE_CACHE_DIR"
-
-clean_intermediate_outputs() {
-    rm -rf \
-        "$REPO_DIR/artifacts" \
-        "$RESCUE_UKI_DIR/mkosi.output" \
-        "$RESCUE_UKI_DIR/mkosi.cache" \
-        "$RESCUE_UKI_DIR/mkosi.builddir" \
-        "$RESCUE_UKI_DIR/mkosi.workspace" \
-        "$RESCUE_UKI_DIR/.mkosi-private" \
-        "$RESCUE_UKI_DIR/mkosi.credentials"
-
-    rm -f \
-        "$RESCUE_UKI_DIR/mkosi.rootpw" \
-        "$RESCUE_UKI_DIR/mkosi.passphrase" \
-        "$RESCUE_UKI_DIR/mkosi.extra/usr/local/bin/rescue-root"
-
-    rm -rf "$RESCUE_UKI_DIR/mkosi.extra/usr/local/share"
-
-    shopt -s nullglob
-    rm -f \
-        "$RESCUE_UKI_DIR"/*.efi \
-        "$RESCUE_UKI_DIR"/*.efi.* \
-        "$RESCUE_UKI_DIR"/*.raw \
-        "$RESCUE_UKI_DIR"/*.raw.* \
-        "$RESCUE_UKI_DIR"/*.tar \
-        "$RESCUE_UKI_DIR"/*.tar.* \
-        "$RESCUE_UKI_DIR"/*.manifest \
-        "$RESCUE_UKI_DIR"/*.changelog \
-        "$RESCUE_UKI_DIR"/*.sha256 \
-        "$RESCUE_UKI_DIR"/*.bmap
-    shopt -u nullglob
-}
 
 clean_previous_iso_outputs() {
     rm -rf "$OUT_DIR"
@@ -93,7 +53,6 @@ trap 'exit 143' TERM
 
 PROFILE_DIR="$WORK_DIR/profile"
 cp -r "$RELENG_DIR" "$PROFILE_DIR"
-write_build_pacman_conf "$PROFILE_DIR/pacman.conf" "$WORK_DIR/pacman.conf"
 
 # Extra live-environment packages on top of the stock releng list
 cat "$SCRIPT_DIR/packages.x86_64" >>"$PROFILE_DIR/packages.x86_64"
@@ -131,7 +90,7 @@ sed -i 's/^iso_name=.*/iso_name="arch-btrfs"/' "$PROFILE_DIR/profiledef.sh"
 
 echo "Building ISO (this takes a few minutes and downloads packages)..."
 clean_previous_iso_outputs
-mkarchiso -v -C "$WORK_DIR/pacman.conf" -w "$WORK_DIR/build" -o "$OUT_DIR" "$PROFILE_DIR"
+mkarchiso -v -w "$WORK_DIR/build" -o "$OUT_DIR" "$PROFILE_DIR"
 
 shopt -s nullglob
 iso_outputs=("$OUT_DIR"/arch-btrfs-*.iso)
@@ -142,7 +101,8 @@ if (( ${#iso_outputs[@]} == 0 )); then
 fi
 final_iso=$(printf '%s\n' "${iso_outputs[@]}" | sort | tail -n 1)
 
-clean_intermediate_outputs
+# The rescue UKI is embedded in the ISO; the intermediate copy is not needed.
+rm -rf "$REPO_DIR/artifacts"
 
 # The build runs as root; give the ISO and its directory back to the
 # invoking user so it can be moved, deleted, or flashed without sudo.
