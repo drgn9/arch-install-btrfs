@@ -277,29 +277,10 @@ btrfs_mount_options_for() {
     esac
 }
 
-# Plain sbctl verify exits 0 even for unsigned files, so enforce the
-# signature from sbctl's JSON output. jq runs inside the target, matching
-# rescue-root; the live/rescue environments do not ship jq.
-verify_target_signed_file() {
-    local file=$1 verification
-
-    verification=$(target_chroot sbctl --json verify "$file")
-    if ! target_chroot jq -e 'length == 1 and .[0].is_signed == 1' <<<"$verification" >/dev/null; then
-        show_error "$file is not signed"
-        return 1
-    fi
-}
-
+# Signs in place, or to a separate output file when one is given. -s records
+# the file in sbctl's database so the sbctl pacman hook re-signs it later.
 sign_target_file() {
-    local source=$1
-    local output=${2:-$1}
-
-    if [[ "$output" == "$source" ]]; then
-        target_chroot sbctl sign -s "$source"
-    else
-        target_chroot sbctl sign -s -o "$output" "$source"
-    fi
-    verify_target_signed_file "$output"
+    target_chroot sbctl sign -s ${2:+-o "$2"} "$1"
 }
 
 mount_target_layout() {
@@ -506,16 +487,14 @@ EOF
 }
 
 install_and_sign_boot_manager() {
-    # Sign the systemd-boot source first so bootctl copies an already
-    # signed binary to the ESP, and so future systemd updates re-sign it
+    # Sign the systemd-boot source first: bootctl copies the .efi.signed
+    # file to the ESP when one exists, and future systemd updates re-sign it
     # via the sbctl pacman hook before systemd-boot-update copies it.
     sign_target_file /usr/lib/systemd/boot/efi/systemd-bootx64.efi \
         /usr/lib/systemd/boot/efi/systemd-bootx64.efi.signed
 
     target_chroot bootctl --esp-path=/efi --variables=no install
 
-    sign_target_file /efi/EFI/systemd/systemd-bootx64.efi
-    sign_target_file /efi/EFI/BOOT/BOOTX64.EFI
     sign_target_file /efi/EFI/Linux/arch-linux.efi
     if [[ -f "/mnt$RESCUE_UKI_TARGET" ]]; then
         sign_target_file "$RESCUE_UKI_TARGET"

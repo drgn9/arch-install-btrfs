@@ -54,7 +54,7 @@ boot custom ISO
 Secure Boot model:
 
 - Firmware must already be in Secure Boot Setup Mode before the installer runs.
-- The installer creates `sbctl` keys, enrolls them, signs `systemd-bootx64.efi` (source, ESP copy, and fallback copy), signs `arch-linux.efi`, signs `arch-rescue.efi`, and verifies signatures.
+- The installer creates `sbctl` keys, enrolls them, and signs the `systemd-bootx64.efi` source (which `bootctl` copies to the ESP), `arch-linux.efi`, and `arch-rescue.efi`. A failed signature stops the install.
 - `fwupd` is configured for custom Secure Boot keys with `/usr/lib/fwupd/efi/fwupdx64.efi.signed` and `DisableShimForSecureBoot=true`.
 - Secure Boot private keys remain on the installed system under `/var/lib/sbctl`, which is mounted from the `@sbctl` Btrfs subvolume.
 - The rescue UKI is not signed at ISO build time. It is signed during installation with the target system's keys.
@@ -532,7 +532,7 @@ Root replacement affects the `@` subvolume only. It does not roll back sibling s
 
 `rescue-root` lists every snapshot directory and description; it does not restrict the menu to pacman snapshots or identify the correct member of a pair for you. To reverse a failed `snap-pac` transaction, select the `pre` snapshot created immediately before that transaction, normally the lower-numbered member of its pre/post pair. The matching `post` snapshot represents the state after the transaction and normally reproduces the bad state. If the description and numbers do not make the intended state clear, cancel and inspect the snapshots before replacing `@`.
 
-Before changing `@`, the selected snapshot must provide `/efi` and `/var/lib/sbctl` mount-point directories and working `mkinitcpio`, `sbctl`, and `jq` commands. The preserved `@sbctl` subvolume must contain the Secure Boot keys, and the ESP must contain the current normal UKI so it can be backed up. `rescue-root` stops before promotion if these prerequisites or boot preparation fail.
+The selected snapshot must be able to rebuild its own boot image: it needs the `/efi` and `/var/lib/sbctl` mount-point directories and working `mkinitcpio` and `sbctl` commands, and the preserved `@sbctl` subvolume must contain the Secure Boot keys. If any of that is missing, the UKI rebuild fails and `rescue-root` stops before changing `@`.
 
 Root replacement does this:
 
@@ -542,28 +542,15 @@ Root replacement does this:
 4. Mount the Btrfs top-level volume at `/mnt`.
 5. List snapshots from `@snapshots`.
 6. Ask which snapshot should become the new `@`.
-7. Create a temporary replacement root named `@new-rollback-<timestamp>`.
-8. Mount the ESP and `@sbctl` inside the temporary replacement.
-9. Back up the current UKIs, rebuild with `mkinitcpio -P`, then sign and verify them from the temporary replacement.
-10. Move the current `@` to `@old-<timestamp>` only after boot preparation succeeds.
-11. Move the temporary replacement into place as the new `@`.
-12. Set and verify the Btrfs default subvolume by ID.
-13. Unmount everything and close LUKS.
-14. Offer to reboot.
+7. Create a writable replacement root named `@new-<timestamp>` from the snapshot.
+8. Mount the ESP and `@sbctl` inside the replacement, rebuild the UKI with `mkinitcpio -P`, and sign it.
+9. Rename the current `@` to `@old-<timestamp>`, then rename the replacement to `@`.
+10. Unmount everything and close LUKS.
+11. Offer to reboot.
 
 The selected source snapshot remains under `@snapshots`; root replacement does not delete it. After success, reboot to start the restored root and rebuilt UKI, then verify the system before deleting either the source snapshot or retained old root.
 
-If root promotion fails, `rescue-root` verifies subvolume identities before restoring the original `@`, original default subvolume, and backed-up UKIs. The failed candidate may be retained as `@new-rollback-<timestamp>` or `@failed-<timestamp>` for inspection. Delete it only after the original system is verified.
-
-If `DO NOT REBOOT` is printed:
-
-1. Stay in the rescue environment. UKI backups under `/run` disappear on reboot.
-2. If the error prints only a UKI backup path, promotion never started and the original `@` is unchanged. Do not rename subvolumes. Mount the ESP at a temporary directory under `/run`, restore `arch-linux.efi` and, when present, `arch-rescue.efi` from that backup directory, then verify the restored files.
-3. If the error also prints original root, original default, and replacement root IDs, automatic promotion recovery failed and the Btrfs names/default may be incomplete. Record all printed IDs and the UKI backup path.
-4. For a promotion-recovery failure, reopen LUKS if cleanup closed it, then mount the Btrfs top level with `mount -o subvolid=5 /dev/mapper/cryptroot /mnt`.
-5. Run `btrfs subvolume list /mnt` and identify subvolumes by the printed IDs, not by names alone. The original may be named `@` or `@old-*`; the replacement may be named `@`, `@new-rollback-*`, or `@failed-*`.
-6. Ensure the printed original root ID is named `@`, moving any replacement at `@` aside first. Restore the default with `btrfs subvolume set-default ORIGINAL_DEFAULT_ID /mnt`, using the separately printed original default ID rather than assuming it equals the root ID.
-7. Restore the backed-up UKIs from a temporary ESP mount under `/run`, then verify the root ID, default ID, and UKIs before unmounting, closing LUKS, and rebooting. If any identity is uncertain, do not rename or delete subvolumes.
+If the UKI rebuild fails, the replacement is deleted and `@` is left as it was. The rebuild may already have overwritten the UKI on the ESP, so the installed system might not boot until a UKI is rebuilt successfully. Stay in rescue and run `rescue-root` again: choose another snapshot, or choose **Repair installed system** and run `mkinitcpio -P` inside the chroot to rebuild the UKI for the current root.
 
 The old root is intentionally kept:
 
@@ -605,9 +592,9 @@ Reinstall does this:
 4. Check network reachability, refresh `archlinux-keyring` in the rescue environment, and validate all package names — all before anything destructive.
 5. Ask for hostname, timezone, Bluetooth/Thunderbolt toggles, username, and password. The LUKS boot unlock method is detected from the LUKS2 header (`systemd-tpm2`/`systemd-fido2` tokens, otherwise passphrase), never freely chosen: a wrong `crypttab.initramfs` on a token-only system is unbootable. No tokens are enrolled or wiped.
 6. Show the effective preserve and recreate sets and require confirmation.
-7. Retire `@`, delete and recreate the recreate set (child subvolumes first), set the new `@` as the Btrfs default subvolume, and mount the full target layout.
+7. Retire `@`, delete and recreate the recreate set (child subvolumes first), and mount the full target layout.
 8. Run `pacstrap`, generate `fstab`, install the payload package selection, and regenerate the target configuration exactly like the fresh installer, including Snapper with deferred `snap-pac`.
-9. Sign and verify systemd-boot, the new UKI, the existing on-ESP rescue UKI, and `fwupd` with the preserved `@sbctl` keys, and recreate the `Linux Boot Manager` firmware entry.
+9. Sign systemd-boot, the new UKI, the existing on-ESP rescue UKI, and `fwupd` with the preserved `@sbctl` keys, and recreate the `Linux Boot Manager` firmware entry.
 10. Unmount, close LUKS, and offer to reboot.
 
 The user account is recreated first, so it gets UID/GID 1000 like the fresh installer; with `@home` preserved, existing file ownership stays correct and ownership is verified after creation. SSH host keys are regenerated by the reinstall, so remote clients will show host-key-changed warnings on first connect; this is expected, not an attack.
