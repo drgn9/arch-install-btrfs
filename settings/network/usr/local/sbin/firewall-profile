@@ -19,7 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-command -v fzf >/dev/null 2>&1 || die "fzf is required; install it through mise first"
+command -v fzf >/dev/null 2>&1 || die "fzf is required"
 
 if ! choice=$(printf '%s\n' "${profiles[@]}" | fzf \
     --style=full \

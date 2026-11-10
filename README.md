@@ -253,7 +253,7 @@ settings/access/       sudo and polkit policy
 settings/boot/         kernel command line, mkinitcpio config, UKI preset
 settings/hardware/     Wi-Fi and fwupd configuration
 settings/network/      networkd, resolved, iwd, nftables, and network sysctls
-settings/power/        sleep, watchdog, and zram policy
+settings/power/        sleep and zram policy
 settings/security/     AppArmor, coredumps, kernel sysctls, and module policy
 settings/optional/     files installed only when a prompt asks for them (Bluetooth and Thunderbolt blocks)
 settings/user/         home-relative niri and mango configuration defaults
@@ -337,7 +337,7 @@ inbound connections and all forwarding. The rules replace only the
 installer-owned `inet workstation` table so independently managed tables,
 including Tailscale's, are preserved.
 
-After `fzf` is available through `mise`, switch persistent profiles with:
+Switch persistent profiles with:
 
 ```bash
 firewall-profile
