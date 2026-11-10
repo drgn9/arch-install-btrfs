@@ -591,7 +591,7 @@ Reinstall does this:
 5. Ask the same questions as the fresh installer: Bluetooth/Thunderbolt toggles, hostname, timezone, username, and password. The LUKS boot unlock method is detected from the LUKS2 header (`systemd-tpm2`/`systemd-fido2` tokens, otherwise passphrase), never freely chosen: a wrong `crypttab.initramfs` on a token-only system is unbootable. No tokens are enrolled or wiped.
 6. Show the effective preserve and recreate sets and the detected boot unlock method, and require confirmation.
 7. Retire `@`, delete and recreate the recreate set (child subvolumes first), and mount the full target layout.
-8. Run `pacstrap`, generate `fstab`, install the payload package selection, and regenerate the target configuration exactly like the fresh installer, including Snapper with deferred `snap-pac`.
+8. Run `pacstrap` with the payload package selection, generate `fstab`, and regenerate the target configuration with the same code as the fresh installer, including Snapper with deferred `snap-pac`.
 9. Sign systemd-boot, the new UKI, the existing on-ESP rescue UKI, and `fwupd` with the preserved `@sbctl` keys, and recreate the `Linux Boot Manager` firmware entry.
 10. Unmount, close LUKS, and offer to reboot.
 
