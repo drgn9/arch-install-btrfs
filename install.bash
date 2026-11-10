@@ -256,6 +256,10 @@ if ! gum confirm "Erase $target_disk and begin installation?"; then
     exit 0
 fi
 
+if gum confirm "Review/delete existing EFI firmware boot entries before install?"; then
+    manage_efi_boot_entries
+fi
+
 if findmnt -rn /mnt >/dev/null 2>&1; then
     show_error "/mnt is already mounted. Unmount it before running the installer."
     exit 1
