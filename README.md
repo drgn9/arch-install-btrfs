@@ -162,7 +162,7 @@ Installer prompts:
 LUKS unlock behavior:
 
 - Passphrase-only installs keep the passphrase unlock method.
-- TPM2 + PIN installs use the install user's password only as a temporary enrollment passphrase. When enrollment asks for the existing LUKS passphrase, enter the install user's password. The installer then removes that password slot. Add backup unlock methods later with `systemd-cryptenroll` if you want them.
+- TPM2 + PIN installs retain the initial LUKS passphrase alongside the TPM2 enrollment. When enrollment asks for the existing LUKS passphrase, enter the install user's password. Either that passphrase or the TPM2 PIN can unlock the drive afterwards, so a cleared or replaced TPM does not lock you out. Changing the account password later does not change the LUKS passphrase.
 - FIDO2 + PIN installs retain the initial LUKS passphrase alongside the enrolled token. When enrollment asks for the existing LUKS passphrase, enter the install user's password. Either that passphrase or the YubiKey and its PIN can unlock the drive afterwards. Changing the account password later does not change the LUKS passphrase. See [Add a Backup FIDO2 Key](#add-a-backup-fido2-key) to enroll a second key using one USB port, test both keys, and optionally remove the password fallback.
 
 Secure Boot requirement:
@@ -422,7 +422,7 @@ If the installed system still boots, prefer `rollback-root` first. It is narrowe
 
 Use `rescue-root` when you need an offline repair environment or when the running system is too broken to trust.
 
-Rescue still requires a valid LUKS unlock method. It cannot bypass encryption. Passphrase-only installations can use their LUKS passphrase. FIDO2 installations can use an enrolled token and PIN or the retained initial LUKS passphrase, unless you removed that password slot after enrolling a backup key. TPM2 installations remove the temporary install-password slot, so the install user's password will not unlock them; use the enrolled token and PIN or a separate recovery key/passphrase slot that you added after installation. Enroll and test backup unlock methods before you need rescue.
+Rescue still requires a valid LUKS unlock method. It cannot bypass encryption. Passphrase-only installations can use their LUKS passphrase. FIDO2 and TPM2 installations can use the enrolled token and PIN or the retained initial LUKS passphrase, unless you removed that password slot yourself after installation. Enroll and test backup unlock methods before you need rescue.
 
 Installed rescue UKI entry points:
 

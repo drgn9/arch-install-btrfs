@@ -164,13 +164,12 @@ configure_target() {
             show_action "ACTION REQUIRED: TPM2 + PIN" \
                 "When asked for the existing LUKS passphrase," \
                 "enter the password for $username." \
-                "The temporary password slot is removed after enrollment."
+                "The password slot remains available as a fallback."
             target_chroot systemd-cryptenroll "$root_part" \
-                --wipe-slot=password \
                 --tpm2-device=auto \
                 --tpm2-with-pin=yes \
                 --tpm2-pcrs=
-            show_success "TPM2 + PIN enrolled for LUKS unlock."
+            show_success "TPM2 + PIN enrolled for LUKS unlock; passphrase fallback retained."
             ;;
         fido2)
             show_action "ACTION REQUIRED: INSERT FIDO2 KEY" \
