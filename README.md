@@ -690,6 +690,7 @@ Important paths:
 ```text
 install.bash                                      main installer
 installer-common.bash                             shared installer code, sourced by install.bash and the rescue reinstall action
+ui.bash                                           shared terminal styling (colors, boxes, messages) for install.bash and rescue-root
 iso/build.sh                                      custom ISO build script
 iso/out/                                          generated ISO output, gitignored
 artifacts/arch-rescue.efi                         generated rescue UKI intermediate, removed after successful ISO build

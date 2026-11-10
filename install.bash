@@ -10,26 +10,29 @@ RESCUE_UKI_SOURCE="$SCRIPT_DIR/artifacts/arch-rescue.efi"
 # shellcheck source=installer-common.bash
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/installer-common.bash"
+# shellcheck source=ui.bash
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/ui.bash"
 
 if [[ ${EUID:-0} -ne 0 ]]; then
-    echo "ERROR: This script must be run as root." >&2
+    show_error "This script must be run as root."
     exit 1
 fi
 
 if [[ ! -d /sys/firmware/efi/efivars ]]; then
-    echo "ERROR: This installer requires UEFI boot mode. Legacy BIOS is not supported." >&2
+    show_error "This installer requires UEFI boot mode. Legacy BIOS is not supported."
     exit 1
 fi
 
 ensure_network() {
     if have_network; then
-        echo "Internet connection OK"
+        show_info "Internet connection OK"
         return 0
     fi
 
     rfkill unblock wifi 2>/dev/null || true
     systemctl start iwd.service 2>/dev/null || true
-    echo "No internet connection detected. The installer needs internet to download packages."
+    show_warn "No internet connection detected. The installer needs internet to download packages."
     show_wifi_instructions install-arch
     echo "Alternatively, plug in an ethernet cable and run install-arch again."
     exit 1
@@ -38,60 +41,14 @@ ensure_network() {
 ensure_network
 
 if timedatectl set-ntp true &>/dev/null; then
-    echo "NTP synchronization enabled"
+    show_info "NTP synchronization enabled"
 else
-    echo "WARNING: Could not enable NTP with timedatectl; continuing. Fix the clock manually if pacman reports signature errors." >&2
+    show_warn "Could not enable NTP with timedatectl; continuing. Fix the clock manually if pacman reports signature errors."
 fi
 
 sed -Ei 's/^#?(ParallelDownloads).*/\1 = 10/' /etc/pacman.conf
-echo "Refreshing pacman databases and archlinux-keyring"
+show_info "Refreshing pacman databases and archlinux-keyring"
 pacman -Sy --needed --noconfirm archlinux-keyring
-
-UI_ACCENT=212
-UI_ACTION=214
-UI_SUCCESS=82
-UI_WIDTH=74
-
-show_header() {
-    clear
-    gum style \
-        --foreground "$UI_ACCENT" --border-foreground "$UI_ACCENT" --border double \
-        --align center --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
-        "Arch Installation (luks + btrfs + uki + systemd-boot)"
-}
-
-show_section() {
-    gum style \
-        --foreground "$UI_ACCENT" --border-foreground "$UI_ACCENT" --border rounded \
-        --bold --width "$UI_WIDTH" --margin "1 2" --padding "0 2" \
-        "$1"
-}
-
-show_action() {
-    local title=$1
-    shift
-
-    gum style \
-        --foreground "$UI_ACTION" --border-foreground "$UI_ACTION" --border double \
-        --bold --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
-        "$title" "" "$@"
-}
-
-show_success() {
-    gum style --foreground "$UI_SUCCESS" --bold --margin "1 2" "$1"
-}
-
-show_info() {
-    gum log --level info "$1"
-}
-
-show_warn() {
-    gum log --level warn "$1"
-}
-
-show_error() {
-    gum log --level error "$1"
-}
 
 cleanup() {
     local line=$1
@@ -151,7 +108,7 @@ enroll_unlock_and_secure_boot() {
 
     case "$unlock_method" in
         tpm2)
-            show_action "ACTION REQUIRED: TPM2 + PIN" \
+            show_action "Action required: TPM2 + PIN" \
                 "When asked for the existing LUKS passphrase," \
                 "enter the password for $username." \
                 "The password slot remains available as a fallback."
@@ -162,11 +119,11 @@ enroll_unlock_and_secure_boot() {
             show_success "TPM2 + PIN enrolled for LUKS unlock; passphrase fallback retained."
             ;;
         fido2)
-            show_action "ACTION REQUIRED: INSERT FIDO2 KEY" \
+            show_action "Action required: insert FIDO2 key" \
                 "Insert your FIDO2 key now." \
                 "Press Enter when the key is ready."
             read -r
-            show_action "ACTION REQUIRED: LUKS PASSPHRASE" \
+            show_action "Action required: LUKS passphrase" \
                 "When asked for the existing LUKS passphrase," \
                 "enter the password for $username." \
                 "The password slot remains available as a fallback." \
@@ -189,7 +146,7 @@ enroll_unlock_and_secure_boot() {
     finalize_target_dns
 }
 
-show_header
+show_header "Arch Linux Installer" "LUKS · Btrfs · UKI · systemd-boot"
 
 loadkeys "$kblayout" || show_warn "Could not load keymap $kblayout (no console access?); continuing"
 
@@ -239,7 +196,7 @@ if gum confirm "Discard all blocks on $target_disk with blkdiscard before partit
 fi
 
 show_section "Installation Summary"
-gum style --border rounded --border-foreground "$UI_ACCENT" --padding "1 2" --margin "0 2" \
+ui_box "$UI_BLUE" "" \
     "Target disk:     $target_disk" \
     "Block discard:   $wipe_mode" \
     "Unlock method:   $unlock_method_label" \
@@ -249,7 +206,7 @@ gum style --border rounded --border-foreground "$UI_ACCENT" --padding "1 2" --ma
     "Timezone:        $timezone" \
     "Username:        $username"
 
-show_action "DESTRUCTIVE OPERATION" \
+show_danger "Destructive operation" \
     "All data on $target_disk will be destroyed."
 if ! gum confirm "Erase $target_disk and begin installation?"; then
     show_info "Installation cancelled"
@@ -319,11 +276,6 @@ if ! cryptsetup close cryptroot; then
     show_error "Failed to close cryptroot. Close it manually before rebooting: cryptsetup close cryptroot"
 fi
 
-echo ""
-gum style \
-    --foreground "$UI_SUCCESS" --border-foreground "$UI_SUCCESS" --border double \
-    --align center --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
-    "Installation Complete" \
-    "" \
+show_done "Installation complete" \
     "Reboot into firmware and enable Secure Boot:" \
     "systemctl reboot --firmware-setup"

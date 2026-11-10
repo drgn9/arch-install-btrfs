@@ -16,54 +16,27 @@ top_mounted=no
 cleanup_enabled=yes
 retired_root=
 REINSTALL_MIN_FREE_GIB=16
-UI_ACCENT=212
-UI_ACTION=214
-UI_SUCCESS=82
-UI_WIDTH=74
 
-show_header() {
-    clear
-    gum style \
-        --foreground "$UI_ACCENT" --border-foreground "$UI_ACCENT" --border double \
-        --align center --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
-        "Arch Rescue"
-}
-
-show_section() {
-    gum style \
-        --foreground "$UI_ACCENT" --border-foreground "$UI_ACCENT" --border rounded \
-        --bold --width "$UI_WIDTH" --margin "1 2" --padding "0 2" \
-        "$1"
-}
-
-show_action() {
-    local title=$1
-    shift
-
-    gum style \
-        --foreground "$UI_ACTION" --border-foreground "$UI_ACTION" --border double \
-        --bold --width "$UI_WIDTH" --margin "1 2" --padding "1 2" \
-        "$title" "" "$@"
-}
-
-show_info() {
-    gum log --level info "$1"
-}
-
-show_warn() {
-    gum log --level warn "$1"
-}
-
-show_error() {
-    gum log --level error "$1"
-}
-
-show_success() {
-    gum style --foreground "$UI_SUCCESS" --bold --margin "1 2" "$1"
-}
+# The styling helpers and the reinstall payload are installed beside each
+# other: at /usr/local/share/arch-new-install in the rescue UKI and at
+# /root/arch-new-install on the live ISO.
+payload_dir=
+for candidate in /usr/local/share/arch-new-install /root/arch-new-install; do
+    if [[ -f "$candidate/ui.bash" ]]; then
+        payload_dir=$candidate
+        break
+    fi
+done
+if [[ -z "$payload_dir" ]]; then
+    echo "ERROR: rescue-root support files not found. Rebuild the rescue image with ./iso/build.sh." >&2
+    exit 1
+fi
+# shellcheck source=ui.bash
+# shellcheck disable=SC1091
+source "$payload_dir/ui.bash"
 
 die() {
-    gum log --level error "$1" >&2
+    show_error "$1"
     exit 1
 }
 
@@ -84,8 +57,8 @@ cleanup_on_failure() {
         cryptsetup close cryptroot 2>/dev/null || true
     fi
     if [[ -n "$retired_root" ]]; then
-        gum log --level warn "The previous root is retained as $retired_root. Re-running the reinstall action is safe."
-        gum log --level warn "To go back to the previous root instead: from the Btrfs top level, delete the new @ and rename $retired_root to @, then choose Repair and run mkinitcpio -P in the chroot."
+        show_warn "The previous root is retained as $retired_root. Re-running the reinstall action is safe."
+        show_warn "To go back to the previous root instead: from the Btrfs top level, delete the new @ and rename $retired_root to @, then choose Repair and run mkinitcpio -P in the chroot."
     fi
 }
 trap 'cleanup_on_failure "$?"' EXIT
@@ -130,12 +103,12 @@ select_target() {
             'FIDO2 or TPM2 token (with PIN)' \
             'Passphrase or recovery key')
         if [[ "$unlock" == 'FIDO2 or TPM2 token (with PIN)' ]]; then
-            show_action "ACTION REQUIRED: SECURITY TOKEN" \
+            show_action "Action required: security token" \
                 "Insert your FIDO2 key if you use one." \
                 "The next prompt asks for your token PIN."
             cryptsetup open --token-only "$root_part" cryptroot
         else
-            show_action "ACTION REQUIRED: LUKS UNLOCK" \
+            show_action "Action required: LUKS unlock" \
                 "Enter a LUKS passphrase or recovery key at the next prompt."
             cryptsetup open --disable-external-tokens "$root_part" cryptroot
         fi
@@ -181,7 +154,7 @@ mount_for_repair() {
     if [[ "$opened_luks" == yes ]]; then
         next_steps+=("Close encryption:  cryptsetup close cryptroot")
     fi
-    show_action "NEXT STEPS" "${next_steps[@]}"
+    show_note "Next steps" "${next_steps[@]}"
 }
 
 list_snapshots() {
@@ -246,7 +219,7 @@ replace_root_from_snapshot() {
     snapshot=${selection%% *}
     [[ -d "/mnt/@snapshots/$snapshot/snapshot" ]] || die "Snapshot $snapshot is invalid."
 
-    show_action "CONFIRM ROOT REPLACEMENT" \
+    show_action "Confirm root replacement" \
         "Restore snapshot: $selection" \
         "The current root will be kept as an @old-* subvolume."
     confirm 'Replace the current root?' || die 'Root replacement cancelled.'
@@ -290,7 +263,7 @@ replace_root_from_snapshot() {
     fi
 
     show_success "Root restored from snapshot $snapshot."
-    show_action "OLD ROOT RETAINED" \
+    show_note "Old root retained" \
         "$old_root" \
         "Keep it until the restored system is verified." \
         "Delete it later with Btrfs Assistant or btrfs subvolume delete."
@@ -301,20 +274,6 @@ replace_root_from_snapshot() {
 }
 
 # --- Rescue reinstall -------------------------------------------------------
-
-# The payload is embedded at /usr/local/share/arch-new-install in the rescue
-# UKI and at /root/arch-new-install on the live ISO.
-resolve_payload_dir() {
-    local candidate
-
-    for candidate in /usr/local/share/arch-new-install /root/arch-new-install; do
-        if [[ -f "$candidate/installer-common.bash" ]]; then
-            payload_dir=$candidate
-            return 0
-        fi
-    done
-    die 'Rescue installer payload not found. Rebuild the rescue image with ./iso/build.sh; reinstall needs the embedded packages, settings, and installer-common.bash.'
-}
 
 preflight_verify_layout() {
     local subvolume
@@ -365,7 +324,7 @@ choose_home_disposition() {
         'Preserve @home (keep all user data)' \
         'Erase @home (destroy all user data)')
     if [[ "$home_choice" == Erase* ]]; then
-        show_action "DESTRUCTIVE: ERASE @home" \
+        show_danger "Destructive: erase @home" \
             "All user data in /home will be destroyed." \
             "There is no retained copy and no undo."
         confirmation=$(gum input --header 'Type ERASE to confirm erasing @home:' --placeholder 'ERASE')
@@ -415,7 +374,6 @@ reinstall_preserving_state() {
     local payload_version subvolume
 
     show_section "Reinstall OS Preserving Selected State"
-    resolve_payload_dir
     payload_version=$(head -n 1 "$payload_dir/payload-version" 2>/dev/null || true)
     show_info "Embedded installer payload: ${payload_version:-unknown version}"
     show_warn 'The embedded packages and settings are frozen at image build time; rebuild the ISO to refresh them.'
@@ -464,7 +422,7 @@ reinstall_preserving_state() {
         effective_preserve+=(@home)
     fi
 
-    show_action "CONFIRM REINSTALL" \
+    show_danger "Confirm reinstall" \
         "Preserved:  ${effective_preserve[*]}" \
         "Recreated:  ${effective_recreate[*]}" \
         "Boot unlock: $unlock_method (from the LUKS header)" \
@@ -534,7 +492,7 @@ reinstall_preserving_state() {
     retired_root=
 
     show_success "Reinstall complete."
-    show_action "OLD ROOT RETAINED" \
+    show_note "Old root retained" \
         "$old_root" \
         "Keep it until the reinstalled system is verified." \
         "Delete it later with Btrfs Assistant or btrfs subvolume delete."
@@ -548,7 +506,7 @@ if [[ ${EUID:-0} -ne 0 ]]; then
     die 'This script must be run as root.'
 fi
 
-show_header
+show_header "Arch Rescue" "repair · restore · reinstall"
 show_section "Choose Rescue Action"
 action=$(gum choose --header 'What do you need to do?' \
     'Repair installed system' \
