@@ -15,6 +15,7 @@ mounted=no
 top_mounted=no
 cleanup_enabled=yes
 retired_root=
+REINSTALL_MIN_FREE_GIB=16
 UI_ACCENT=212
 UI_ACTION=214
 UI_SUCCESS=82
@@ -84,6 +85,7 @@ cleanup_on_failure() {
     fi
     if [[ -n "$retired_root" ]]; then
         gum log --level warn "The previous root is retained as $retired_root. Re-running the reinstall action is safe."
+        gum log --level warn "To go back to the previous root instead: from the Btrfs top level, delete the new @ and rename $retired_root to @, then choose Repair and run mkinitcpio -P in the chroot."
     fi
 }
 trap 'cleanup_on_failure "$?"' EXIT
@@ -344,56 +346,14 @@ preflight_verify_esp() {
     rmdir "$esp_probe"
 }
 
-prompt_reinstall_settings() {
-    kblayout=us
-    locale=en_US.UTF-8
+# The current root is retained, so the new system needs room beside it.
+preflight_verify_free_space() {
+    local free_gib
 
-    show_section "Hostname"
-    while true; do
-        hostname=$(gum input --header "Enter hostname:" --placeholder "archlinux" --char-limit 63)
-        [[ -n "$hostname" ]] || { show_error "You need to enter a hostname"; continue; }
-        [[ "$hostname" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] || { show_error "Invalid hostname"; continue; }
-        break
-    done
-
-    show_section "Timezone"
-    tz_region=$(find /usr/share/zoneinfo -maxdepth 1 -type d \
-        -not -name 'zoneinfo' -not -name 'posix' -not -name 'right' \
-        -printf '%f\n' 2>/dev/null | sort | \
-        gum filter --header "Select region:" --placeholder "Search region..." --height 15)
-    tz_city=$(find "/usr/share/zoneinfo/$tz_region" -type f -printf '%P\n' 2>/dev/null | sort | \
-        gum filter --header "Select city:" --placeholder "Search city..." --height 15)
-    timezone="$tz_region/$tz_city"
-
-    show_section "Hardware"
-    if gum confirm "Disable Bluetooth?"; then
-        disable_bluetooth=yes
-    else
-        disable_bluetooth=no
+    free_gib=$(( $(df --output=avail -B1 /mnt | tail -n 1) / 1073741824 ))
+    if (( free_gib < REINSTALL_MIN_FREE_GIB )); then
+        die "Only $free_gib GiB is free on the Btrfs filesystem. Reinstall keeps the current root and needs at least $REINSTALL_MIN_FREE_GIB GiB. Free some space, for example by deleting old @old-* subvolumes, then run rescue-root again."
     fi
-
-    if gum confirm "Disable Thunderbolt?"; then
-        disable_thunderbolt=yes
-    else
-        disable_thunderbolt=no
-    fi
-
-    show_section "User Account"
-    while true; do
-        username=$(gum input --header "Enter username:" --placeholder "user")
-        [[ -n "$username" ]] || { show_error "You need to enter a username"; continue; }
-        [[ "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { show_error "Invalid username"; continue; }
-        [[ "$username" != root ]] || { show_error "root cannot be used as the regular account"; continue; }
-        break
-    done
-
-    while true; do
-        userpass=$(gum input --password --header "Enter password for $username:")
-        [[ -n "$userpass" ]] || { show_error "You need to enter a password"; continue; }
-        userpass2=$(gum input --password --header "Confirm password for $username:")
-        [[ "$userpass" == "$userpass2" ]] || { show_error "Passwords do not match"; continue; }
-        break
-    done
 }
 
 choose_home_disposition() {
@@ -449,7 +409,6 @@ detect_enrolled_unlock_method() {
             [[ "$chosen" == systemd-tpm2 ]] && unlock_method=tpm2 || unlock_method=fido2
             ;;
     esac
-    confirm "Generate boot unlock config (crypttab.initramfs) for: $unlock_method?" || die 'Reinstall cancelled; nothing was changed.'
 }
 
 reinstall_preserving_state() {
@@ -475,6 +434,7 @@ reinstall_preserving_state() {
     show_section "Reinstall Preflight"
     preflight_verify_layout
     preflight_verify_esp
+    preflight_verify_free_space
 
     show_info 'Checking network reachability'
     if ! have_network; then
@@ -493,7 +453,7 @@ reinstall_preserving_state() {
     collect_selected_packages
     preflight_validate_packages
 
-    prompt_reinstall_settings
+    prompt_system_settings
     choose_home_disposition
     detect_enrolled_unlock_method
 
@@ -509,6 +469,7 @@ reinstall_preserving_state() {
     show_action "CONFIRM REINSTALL" \
         "Preserved:  ${effective_preserve[*]}" \
         "Recreated:  ${effective_recreate[*]}" \
+        "Boot unlock: $unlock_method (from the LUKS header)" \
         "The current root is retained as @old-reinstall-<timestamp>." \
         "Partition table, ESP, LUKS container, and Secure Boot keys are kept."
     confirm 'Retire the current root and reinstall?' || die 'Reinstall cancelled; nothing was changed.'
@@ -547,23 +508,7 @@ reinstall_preserving_state() {
     mount_target_layout
     mounted=yes
 
-    detect_microcode
-    show_section "Base System"
-    show_info 'Installing base system with pacstrap'
-    pacstrap -K /mnt \
-        base base-devel linux linux-headers "$microcode" linux-firmware
-
-    show_info 'Generating fstab'
-    genfstab -U /mnt >/mnt/etc/fstab
-
-    root_uuid=$(blkid -s UUID -o value "$root_part")
-
-    show_section "Package Installation"
-    install_selected_packages
-
-    show_section "System Configuration"
-    show_info 'Configuring target system'
-    configure_target_system
+    install_target_system
     verify_home_ownership
     unset userpass userpass2
 

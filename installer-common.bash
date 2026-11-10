@@ -5,6 +5,9 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034,SC2154
 
+kblayout=us
+locale=en_US.UTF-8
+
 BTRFS_MOUNT_OPTIONS="noatime,compress=zstd:3"
 BTRFS_DATA_MOUNT_OPTIONS="$BTRFS_MOUNT_OPTIONS,nodev,nosuid"
 BTRFS_STRICT_MOUNT_OPTIONS="$BTRFS_DATA_MOUNT_OPTIONS,noexec"
@@ -101,6 +104,56 @@ show_wifi_instructions() {
     printf '  6. Run: exit (to leave iwctl)\n'
     printf '  7. Wait a few seconds, then run: %s\n' "$resume_command"
     printf '     Internet access will be checked again.\n\n'
+}
+
+# Prompts shared by fresh install and rescue reinstall.
+prompt_system_settings() {
+    show_section "Hardware"
+    if gum confirm "Disable Bluetooth?"; then
+        disable_bluetooth=yes
+    else
+        disable_bluetooth=no
+    fi
+
+    if gum confirm "Disable Thunderbolt?"; then
+        disable_thunderbolt=yes
+    else
+        disable_thunderbolt=no
+    fi
+
+    show_section "Hostname"
+    while true; do
+        hostname=$(gum input --header "Enter hostname:" --placeholder "archlinux" --char-limit 63)
+        [[ -n "$hostname" ]] || { show_error "You need to enter a hostname"; continue; }
+        [[ "$hostname" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] || { show_error "Invalid hostname"; continue; }
+        break
+    done
+
+    show_section "Timezone"
+    tz_region=$(find /usr/share/zoneinfo -maxdepth 1 -type d \
+        -not -name 'zoneinfo' -not -name 'posix' -not -name 'right' \
+        -printf '%f\n' 2>/dev/null | sort | \
+        gum filter --header "Select region:" --placeholder "Search region..." --height 15)
+    tz_city=$(find "/usr/share/zoneinfo/$tz_region" -type f -printf '%P\n' 2>/dev/null | sort | \
+        gum filter --header "Select city:" --placeholder "Search city..." --height 15)
+    timezone="$tz_region/$tz_city"
+
+    show_section "User Account"
+    while true; do
+        username=$(gum input --header "Enter username:" --placeholder "user")
+        [[ -n "$username" ]] || { show_error "You need to enter a username"; continue; }
+        [[ "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { show_error "Invalid username"; continue; }
+        [[ "$username" != root ]] || { show_error "root cannot be used as the regular account"; continue; }
+        break
+    done
+
+    while true; do
+        userpass=$(gum input --password --header "Enter password for $username:")
+        [[ -n "$userpass" ]] || { show_error "You need to enter a password"; continue; }
+        userpass2=$(gum input --password --header "Confirm password for $username:")
+        [[ "$userpass" == "$userpass2" ]] || { show_error "Passwords do not match"; continue; }
+        break
+    done
 }
 
 partition_path() {
@@ -330,8 +383,29 @@ setup_snapper_rollback() {
     target_chroot pacman -S --needed --noconfirm snap-pac
 }
 
-# Target configuration shared by fresh install and rescue reinstall. The
-# fresh-install-only steps (rescue UKI copy, LUKS token enrollment, Secure
+# Installs and configures the OS into the mounted target layout. Shared by
+# fresh install and rescue reinstall, so both paths build the same system.
+install_target_system() {
+    detect_microcode
+    show_section "Base System"
+    show_info "Installing base system with pacstrap"
+    pacstrap -K /mnt \
+        base base-devel linux linux-headers "$microcode" linux-firmware
+
+    show_info "Generating fstab"
+    genfstab -U /mnt >/mnt/etc/fstab
+
+    root_uuid=$(blkid -s UUID -o value "$root_part")
+
+    show_section "Package Installation"
+    install_selected_packages
+
+    show_section "System Configuration"
+    show_info "Configuring target system"
+    configure_target_system
+}
+
+# The fresh-install-only steps (rescue UKI copy, LUKS token enrollment, Secure
 # Boot key creation/enrollment) stay in install.bash.
 configure_target_system() {
     local firewall_profile

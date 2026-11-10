@@ -149,11 +149,11 @@ preflight_validate_rescue_uki() {
     fi
 }
 
-configure_target() {
-    # The rescue UKI artifact exists only in the live installer environment;
-    # rescue reinstall keeps the copy already on the ESP instead.
+# Fresh-install-only steps: rescue UKI copy, LUKS token enrollment, and
+# Secure Boot key creation/enrollment. Rescue reinstall keeps the rescue UKI,
+# tokens, and keys that already exist.
+enroll_unlock_and_secure_boot() {
     install -D -m 0644 "$RESCUE_UKI_SOURCE" "/mnt$RESCUE_UKI_TARGET"
-    configure_target_system
 
     if [[ "$unlock_method" != "passphrase" ]]; then
         show_section "LUKS Token Enrollment"
@@ -204,8 +204,6 @@ configure_target() {
 
 show_header
 
-kblayout=us
-locale=en_US.UTF-8
 loadkeys "$kblayout" || show_warn "Could not load keymap $kblayout (no console access?); continuing"
 
 show_section "LUKS Unlock"
@@ -229,52 +227,7 @@ fi
 show_info "Secure Boot setup is mandatory and firmware Setup Mode is enabled"
 show_info "Kernel lockdown integrity mode is mandatory"
 
-show_section "Hardware"
-if gum confirm "Disable Bluetooth?"; then
-    disable_bluetooth=yes
-else
-    disable_bluetooth=no
-fi
-
-if gum confirm "Disable Thunderbolt?"; then
-    disable_thunderbolt=yes
-else
-    disable_thunderbolt=no
-fi
-
-show_section "Hostname"
-while true; do
-    hostname=$(gum input --header "Enter hostname:" --placeholder "archlinux" --char-limit 63)
-    [[ -n "$hostname" ]] || { show_error "You need to enter a hostname"; continue; }
-    [[ "$hostname" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] || { show_error "Invalid hostname"; continue; }
-    break
-done
-
-show_section "Timezone"
-tz_region=$(find /usr/share/zoneinfo -maxdepth 1 -type d \
-    -not -name 'zoneinfo' -not -name 'posix' -not -name 'right' \
-    -printf '%f\n' 2>/dev/null | sort | \
-    gum filter --header "Select region:" --placeholder "Search region..." --height 15)
-tz_city=$(find "/usr/share/zoneinfo/$tz_region" -type f -printf '%P\n' 2>/dev/null | sort | \
-    gum filter --header "Select city:" --placeholder "Search city..." --height 15)
-timezone="$tz_region/$tz_city"
-
-show_section "User Account"
-while true; do
-    username=$(gum input --header "Enter username:" --placeholder "user")
-    [[ -n "$username" ]] || { show_error "You need to enter a username"; continue; }
-    [[ "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { show_error "Invalid username"; continue; }
-    [[ "$username" != root ]] || { show_error "root cannot be used as the regular account"; continue; }
-    break
-done
-
-while true; do
-    userpass=$(gum input --password --header "Enter password for $username:")
-    [[ -n "$userpass" ]] || { show_error "You need to enter a password"; continue; }
-    userpass2=$(gum input --password --header "Confirm password for $username:")
-    [[ "$userpass" == "$userpass2" ]] || { show_error "Passwords do not match"; continue; }
-    break
-done
+prompt_system_settings
 
 show_section "Target Disk"
 devices=$(lsblk --nodeps --paths --list --noheadings --sort=size --output=name,size,type,model | awk '$3 == "disk"')
@@ -374,23 +327,8 @@ umount /mnt
 
 mount_target_layout
 
-detect_microcode
-show_section "Base System"
-show_info "Installing base system with pacstrap"
-pacstrap -K /mnt \
-    base base-devel linux linux-headers "$microcode" linux-firmware
-
-show_info "Generating fstab"
-genfstab -U /mnt >/mnt/etc/fstab
-
-root_uuid=$(blkid -s UUID -o value "$root_part")
-
-show_section "Package Installation"
-install_selected_packages
-
-show_section "System Configuration"
-show_info "Configuring target system"
-configure_target
+install_target_system
+enroll_unlock_and_secure_boot
 unset userpass userpass2
 
 show_section "Finalizing Installation"
